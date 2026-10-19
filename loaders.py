@@ -9,38 +9,70 @@ from googleapiclient.http import MediaIoBaseDownload
 
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 
+from google_auth_oauthlib.flow import Flow
+import streamlit as st
+from googleapiclient.discovery import build
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+
+# SCOPES tanımının burada olduğunu varsayıyoruz
+
 def get_oauth_drive_service():
-    """OAuth ile Google Drive servisini başlatır (lokal veya Streamlit uyumlu)."""
+    """OAuth ile Google Drive servisini başlatır (Streamlit Cloud ve Lokal uyumlu)."""
     creds = None
     
-    # Eğer daha önce kaydedilmiş bir token varsa yükle
+    # 1. Oturumda kayıtlı token var mı?
     if "oauth_creds" in st.session_state:
         creds_data = st.session_state["oauth_creds"]
         creds = Credentials.from_authorized_user_info(creds_data, SCOPES)
         
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            # Streamlit secrets içindeki client yapılandırmasını alıyoruz
+            try:
+                creds.refresh(Request())
+            except Exception:
+                creds = None
+                
+        if not creds:
             if "gcp_oauth_client" in st.secrets:
                 client_config = {"installed": dict(st.secrets["gcp_oauth_client"])}
             else:
+                st.error("Google OAuth client bilgileri secrets içinde bulunamadı!")
                 return None
             
-            # Lokal test için InstalledAppFlow kullanıyoruz
-            flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
-            creds = flow.run_local_server(port=0)
+            # Streamlit Cloud'da tarayıcı açamayacağımız için Flow kullanıyoruz
+            flow = Flow.from_client_config(
+                client_config,
+                scopes=SCOPES,
+                redirect_uri="urn:ietf:wg:oauth:2.0:oob" # Tarayıcısız / manuel kod akışı için
+            )
             
-        # Yetkileri oturumda sakla
-        st.session_state["oauth_creds"] = {
-            'token': creds.token,
-            'refresh_token': creds.refresh_token,
-            'token_uri': creds.token_uri,
-            'client_id': creds.client_id,
-            'client_secret': creds.client_secret,
-            'scopes': creds.scopes
-        }
+            auth_url, _ = flow.authorization_url(prompt='consent')
+            
+            st.warning("Google Drive erişimi için yetkilendirme gerekiyor.")
+            st.markdown(f"1. [Buraya tıklayarak Google hesabınızla giriş yapın ve kodu alın]({auth_url})")
+            
+            auth_code = st.text_input("Google'dan aldığınız yetkilendirme kodunu buraya yapıştırın:")
+            
+            if auth_code:
+                try:
+                    flow.fetch_token(code=auth_code)
+                    creds = flow.credentials
+                    st.session_state["oauth_creds"] = {
+                        'token': creds.token,
+                        'refresh_token': creds.refresh_token,
+                        'token_uri': creds.token_uri,
+                        'client_id': creds.client_id,
+                        'client_secret': creds.client_secret,
+                        'scopes': creds.scopes
+                    }
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Kod doğrulama hatası: {e}")
+                    return None
+            else:
+                st.info("Devam etmek için lütfen yukarıdaki adımları takip edin.")
+                return None
 
     return build('drive', 'v3', credentials=creds)
 
