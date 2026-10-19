@@ -5,9 +5,9 @@ from langchain_openai import ChatOpenAI
 load_dotenv()
 my_key_openai = os.getenv("openai_key")
 
-llm_o1 = ChatOpenAI(
+llm_gpt = ChatOpenAI(
     api_key=my_key_openai,
-    model="o1"
+    model="gpt-4o"
 )
 
 # Parametre adını 'sql_kodu' yaptık ki app.py ile uyuşsun
@@ -37,5 +37,5 @@ def evaluate_student_sql(sql_kodu: str, schema_path="schemas/odev1_sema.txt"):
     {sql_kodu}
     """
 
-    AI_Response = llm_o1.invoke(final_prompt)
+    AI_Response = llm_gpt.invoke(final_prompt)
     return AI_Response.content
