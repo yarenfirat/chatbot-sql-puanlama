@@ -1,47 +1,49 @@
 import streamlit as st
-from loaders import find_and_load_student_sql
-from raghelper import evaluate_student_sql as evaluate_student_code
+from loaders import get_oauth_drive_service, list_student_folders, get_sql_file_from_student_folder
+from raghelper import evaluate_student_sql
 
-st.set_page_config(page_title="Mentor Cockpit - SQL Değerlendirme", layout="wide")
 st.title("Mentor Cockpit: Öğrenci SQL Ödev Değerlendirme")
-st.divider()
 
-# Ekranı iki sütuna bölelim: Sol taraf giriş alanı, sağ taraf sonuç raporu
-col_input, col_result = st.columns([1, 2])
+PARENT_FOLDER_ID = "1_E3hV4U032hF7TRQFi129XAOyVlgXpWu"
 
-with col_input:
-    st.subheader("Öğrenci Arama")
-    student_name_input = st.text_input(label="Öğrencinin Adını ve Soyadını Giriniz:")
-    st.divider()
-    submit_btn = st.button(label="Ödevi Değerlendir", key="eval_button")
+# Drive servisini çağırıyoruz
+service = get_oauth_drive_service()
 
-if submit_btn:
-    if not student_name_input:
-        st.warning("Lütfen değerlendirmek istediğiniz öğrencinin adını girin.")
-    else:
-        with st.spinner("Öğrenci dosyası aranıyor ve o1 modeliyle değerlendiriliyor..."):
+if service:
+    try:
+        student_folders = list_student_folders(service, PARENT_FOLDER_ID)
+        
+        if student_folders:
+            # Açılır menü yerine, öğrenci adını aratabileceğimiz veya yazabileceğimiz bir metin kutusu
+            search_query = st.text_input("Değerlendirilecek Öğrencinin Adını Yazın (örn: İsim Soyisim):", "")
             
-            # 1. Aşama: loaders.py ile dosyayı bul ve oku
-            load_result = find_and_load_student_sql(student_name=student_name_input)
+            # Eğer bir şeyler yazıldıysa, eşleşen öğrencileri filtrele
+            matched_students = {name: fid for name, fid in student_folders.items() if search_query.lower() in name.lower()}
             
-            if "error" in load_result:
-                st.error(load_result["error"])
-            else:
-                dosya_adi = load_result["dosya_adi"]
-                sql_kodu = load_result["sql_kodu"]
-                
-                # 2. Aşama: rag.py (değerlendirme fonksiyonu) ile modeli çalıştır
-                ai_evaluation = evaluate_student_code(sql_kodu=sql_kodu)
-                
-                # 3. Aşama: Sonuçları ekrana yazdır
-                # Sonuçları ekrana yazdırırken
-                with col_result:
-                    st.success(f"Başarılı! Bulunan Dosya: {dosya_adi}")
+            if search_query:
+                if matched_students:
+                    selected_student = st.selectbox("Eşleşen Öğrenciler:", list(matched_students.keys()))
+                    student_folder_id = matched_students[selected_student]
                     
-                    # Puan ve Rapor
-                    st.markdown("### 🤖 Yapay Zeka Değerlendirme ve Puanlama Raporu")
-                    st.markdown(ai_evaluation)
-                    st.divider()
-                    
-                    with st.expander("Öğrencinin Orijinal SQL Kodunu Gör"):
-                        st.code(sql_kodu, language="sql")
+                    if st.button("Ödevi Değerlendir"):
+                        with st.spinner(f"{selected_student} adlı öğrencinin ödevi Google Drive'dan okunuyor ve gpt-4o modeli inceliyor..."):
+                            sql_code, file_name = get_sql_file_from_student_folder(service, student_folder_id)
+                            
+                            if sql_code:
+                                st.success(f"Başarılı! Bulunan Dosya: {file_name}")
+                                
+                                report = evaluate_student_sql(sql_code)
+                                st.markdown(report)
+                                
+                                with st.expander("Öğrencinin Orijinal SQL Kodunu Gör"):
+                                    st.code(sql_code, language="sql")
+                            else:
+                                st.warning(file_name)
+                else:
+                    st.info("Aradığınız kritere uygun öğrenci bulunamadı.")
+        else:
+            st.warning("Klasör altında öğrenci klasörleri bulunamadı. Lütfen klasör izinlerini kontrol edin.")
+    except Exception as e:
+        st.error(f"Google Drive bağlantı hatası: {e}")
+else:
+    st.info("Google Drive'a bağlanmak için lütfen yetkilendirmeyi tamamlayın.")
