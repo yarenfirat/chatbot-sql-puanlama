@@ -1,8 +1,7 @@
 streamlit
-openai
-langchain
-langchain-openai
-google-api-python-client
-google-auth-oauthlib
 python-dotenv
-pandas
+google-genai
+langchain
+langchain-core
+langchain-community
+langchain-google-genai

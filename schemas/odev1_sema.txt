@@ -1,1 +1,34 @@
+VERİTABANI ŞEMASI VE TABLO YAPILARI:
 
+1. Tablo: Departman
+- DepartmanID (INT, Primary Key): Departmanın benzersiz numarası
+- DepartmanAdi (VARCHAR): Departmanın adı
+- Lokasyon (VARCHAR): Bulunduğu konum/şehir
+- AktifMi (INT): Aktif durum bilgisi
+- OlusturmaTarihi (DATETIME): Oluşturulma tarihi
+- Butce (DECIMAL): Departman bütçesi
+
+2. Tablo: Personel
+- PersonelID (INT, Primary Key): Personelin benzersiz numarası
+- AdSoyad (VARCHAR): Personel adı ve soyadı
+- Eposta (VARCHAR): E-posta adresi
+- Telefon (VARCHAR): Telefon numarası
+- IseGirisTarihi (DATE): İşe giriş tarihi
+- Maas (DECIMAL): Maaş bilgisi
+- DepartmanID (INT, Foreign Key): Bağlı olduğu departman
+- PozisyonID (INT, Foreign Key): Sahip olduğu pozisyon
+- AktifMi (INT): Aktif çalışan bilgisi
+- KayitTarihi (DATETIME): Kayıt tarihi
+- Link (VARCHAR): İlgili bağlantı
+
+3. Tablo: Pozisyon
+- PozisyonID (INT, Primary Key): Pozisyonun benzersiz numarası
+- PozisyonAdi (VARCHAR): Pozisyonun adı
+
+4. Tablo: EgitimKatilim
+- KatilimID (INT, Primary Key): Katılımın benzersiz numarası
+- PersonelID (INT, Foreign Key): Eğitime katılan personel ID'si
+- EgitimAdi (VARCHAR): Alınan eğitimin adı
+- EgitimTarihi (DATE): Eğitimin tarihi
+- Saat (INT): Eğitim süresi (saat)
+- SertifikaAlindi (INT): Sertifika alınıp alınmadığı (0 veya 1)

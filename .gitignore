@@ -1,8 +1,0 @@
-# Hassas Bilgiler ve Gizli Dosyalar
-.streamlit/secrets.toml
-.env
-
-# Python ve Sanal Ortam Önbelleği
-venv/
-__pycache__/
-.DS_Store
