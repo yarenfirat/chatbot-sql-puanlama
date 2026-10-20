@@ -33,7 +33,7 @@ def get_oauth_drive_service():
                 return None
             
             # Streamlit Cloud canlı yönlendirme adresi
-            redirect_uri = "https://chatbot-sql-puanlama-nscvmjabumqjqyt4bvbybb.streamlit.app/"
+            redirect_uri = "https://chatbot-sql-puanlama-nscvmjabumqjqyt4bvbybb.streamlit.app"
             
             flow = Flow.from_client_config(
                 client_config,
