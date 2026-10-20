@@ -106,7 +106,7 @@ def list_student_folders(service, parent_folder_id):
     """Drive'daki klasörleri listeler."""
     try:
         results = service.files().list(
-            q=f"'{parent_folder_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
+            q="mimeType = 'application/vnd.google-apps.folder' and trashed = false",
             pageSize=100,
             fields="files(id, name)",
             supportsAllDrives=True,
@@ -114,7 +114,9 @@ def list_student_folders(service, parent_folder_id):
         ).execute()
         
         folders = results.get('files', [])
-        return {f['name']: f['id'] for f in folders}
+        student_folders = {f['name']: f['id'] for f in folders}
+        return student_folders
+        
     except Exception as e:
         st.error(f"Klasör listeleme hatası: {e}")
         return {}
