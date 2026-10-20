@@ -1,9 +1,14 @@
 import os
+import streamlit as st
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 
 load_dotenv()
-my_key_openai = os.getenv("openai_key")
+
+if "openai_key" in st.secrets:
+    my_key_openai = st.secrets["openai_key"]
+else:
+    my_key_openai = os.getenv("openai_key")
 
 llm_gpt = ChatOpenAI(
     api_key=my_key_openai,
