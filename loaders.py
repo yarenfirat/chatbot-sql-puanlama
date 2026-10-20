@@ -10,7 +10,7 @@ from googleapiclient.http import MediaIoBaseDownload
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 
 def get_oauth_drive_service():
-    """OAuth ile Google Drive servisini başlatır (Streamlit Cloud uyumlu)."""
+    """OAuth ile Google Drive servisini otomatik başlatır (Streamlit URL redirect uyumlu)."""
     creds = None
     
     # 1. Oturumda kayıtlı token var mı?
@@ -32,10 +32,9 @@ def get_oauth_drive_service():
                 st.error("Google OAuth client bilgileri secrets içinde bulunamadı!")
                 return None
             
-            # Streamlit Cloud canlı yönlendirme adresi
             redirect_uri = "https://chatbot-sql-puanlama-nscvmjabumqjqyt4bvbybb.streamlit.app"
             
-            # Akış nesnesini session_state içinde saklıyoruz ki kod doğrulanırken verifier sıfırlanmasın
+            # Flow nesnesini session_state'de tutuyoruz ki redirect sonrasında kaybolmasın
             if "oauth_flow" not in st.session_state:
                 st.session_state["oauth_flow"] = Flow.from_client_config(
                     client_config,
@@ -45,21 +44,13 @@ def get_oauth_drive_service():
             
             flow = st.session_state["oauth_flow"]
             
-            try:
-                auth_url, _ = flow.authorization_url(prompt='consent', include_granted_scopes='true', access_type='offline')
-            except Exception as e:
-                st.error(f"Auth URL oluşturulamadı: {e}")
-                return None
-            
-            st.warning("Google Drive erişimi için yetkilendirme gerekiyor.")
-            st.markdown(f"1. [Buraya tıklayarak Google hesabınızla giriş yapın ve kodu alın]({auth_url})")
-            
-            auth_code = st.text_input("Google'dan aldığınız yetkilendirme kodunu buraya yapıştırın:")
+            # URL'de Google'dan gelen bir 'code' var mı kontrol et
+            query_params = st.query_params
+            auth_code = query_params.get("code")
             
             if auth_code:
                 try:
-                    # Baştaki ve sondaki olası boşlukları temizleyelim
-                    auth_code = auth_code.strip()
+                    # Kodu URL'den otomatik yakaladık, token'ı alıyoruz
                     flow.fetch_token(code=auth_code)
                     creds = flow.credentials
                     st.session_state["oauth_creds"] = {
@@ -70,15 +61,26 @@ def get_oauth_drive_service():
                         'client_secret': creds.client_secret,
                         'scopes': creds.scopes
                     }
-                    # İşlem bitince flow nesnesini temizleyebiliriz
                     if "oauth_flow" in st.session_state:
                         del st.session_state["oauth_flow"]
+                    
+                    # URL'deki code parametresini temizleyip sayfayı yenile
+                    st.query_params.clear()
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Kod doğrulama hatası: {e}")
+                    st.error(f"Otomatik kod doğrulama hatası: {e}")
                     return None
             else:
-                st.info("Devam etmek için lütfen yukarıdaki adımları takip edin.")
+                # URL'de kod yoksa kullanıcıyı giriş yapması için yönlendir
+                try:
+                    auth_url, _ = flow.authorization_url(prompt='consent', include_granted_scopes='true', access_type='offline')
+                except Exception as e:
+                    st.error(f"Auth URL oluşturulamadı: {e}")
+                    return None
+                
+                st.warning("Google Drive erişimi için yetkilendirme gerekiyor.")
+                st.markdown(f"Lütfen aşağıdaki butona tıklayarak Google hesabınızla giriş yapın:")
+                st.markdown(f'<a href="{auth_url}" target="_self"><button style="background-color: #4CAF50; color: white; padding: 10px 24px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px;">Google ile Giriş Yap</button></a>', unsafe_allow_html=True)
                 return None
 
     return build('drive', 'v3', credentials=creds)
@@ -97,7 +99,6 @@ def list_student_folders(service, parent_folder_id):
         folders = results.get('files', [])
         student_folders = {f['name']: f['id'] for f in folders}
         return student_folders
-        
     except Exception as e:
         print(f"DEBUG - Hata: {e}")
         return {}
