@@ -35,14 +35,18 @@ def get_oauth_drive_service():
             # Streamlit Cloud canlı yönlendirme adresi
             redirect_uri = "https://chatbot-sql-puanlama-nscvmjabumqjqyt4bvbybb.streamlit.app"
             
-            flow = Flow.from_client_config(
-                client_config,
-                scopes=SCOPES,
-                redirect_uri=redirect_uri
-            )
+            # Akış nesnesini session_state içinde saklıyoruz ki kod doğrulanırken verifier sıfırlanmasın
+            if "oauth_flow" not in st.session_state:
+                st.session_state["oauth_flow"] = Flow.from_client_config(
+                    client_config,
+                    scopes=SCOPES,
+                    redirect_uri=redirect_uri
+                )
+            
+            flow = st.session_state["oauth_flow"]
             
             try:
-                auth_url, _ = flow.authorization_url(prompt='consent')
+                auth_url, _ = flow.authorization_url(prompt='consent', include_granted_scopes='true', access_type='offline')
             except Exception as e:
                 st.error(f"Auth URL oluşturulamadı: {e}")
                 return None
@@ -54,6 +58,8 @@ def get_oauth_drive_service():
             
             if auth_code:
                 try:
+                    # Baştaki ve sondaki olası boşlukları temizleyelim
+                    auth_code = auth_code.strip()
                     flow.fetch_token(code=auth_code)
                     creds = flow.credentials
                     st.session_state["oauth_creds"] = {
@@ -64,6 +70,9 @@ def get_oauth_drive_service():
                         'client_secret': creds.client_secret,
                         'scopes': creds.scopes
                     }
+                    # İşlem bitince flow nesnesini temizleyebiliriz
+                    if "oauth_flow" in st.session_state:
+                        del st.session_state["oauth_flow"]
                     st.rerun()
                 except Exception as e:
                     st.error(f"Kod doğrulama hatası: {e}")
