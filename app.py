@@ -5,7 +5,7 @@ from raghelper import evaluate_student_sql
 st.title("Mentor Cockpit: Öğrenci SQL Ödev Değerlendirme")
 
 # BURAYA 2_SQL ANA KLASÖRÜNÜN GERÇEK ID'SİNİ YAPIŞTIRMALISIN
-PARENT_FOLDER_ID = "BURAYA_DOGRU_KLASOR_IDSINI_YAZ"
+PARENT_FOLDER_ID = "1_E3hv4U032hF7TRQFI129XAoyVIgXpwU"
 
 # Drive servisini çağırıyoruz
 service = get_oauth_drive_service()
