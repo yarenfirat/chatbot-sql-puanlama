@@ -105,15 +105,26 @@ def get_oauth_drive_service():
 def list_student_folders(service, parent_folder_id):
     """Drive'daki klasörleri listeler."""
     try:
-        results = service.files().list(
-            q="mimeType = 'application/vnd.google-apps.folder' and trashed = false",
-            pageSize=100,
-            fields="files(id, name)",
-            supportsAllDrives=True,
-            includeItemsFromAllDrives=True
-        ).execute()
+        folders = []
+        page_token = None
         
-        folders = results.get('files', [])
+        while True:
+            # Sadece senin verdiğin parent_folder_id'nin içindeki klasörleri çeker
+            results = service.files().list(
+                q=f"'{parent_folder_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
+                pageSize=100,
+                fields="nextPageToken, files(id, name)",
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+                pageToken=page_token
+            ).execute()
+            
+            folders.extend(results.get('files', []))
+            page_token = results.get('nextPageToken', None)
+            
+            if page_token is None:
+                break
+                
         student_folders = {f['name']: f['id'] for f in folders}
         return student_folders
         
@@ -133,6 +144,7 @@ def get_sql_file_from_student_folder(service, student_folder_id):
     ).execute()
     files = results.get('files', [])
     
+    # Senin esnek arama mantığını (sadece .sql değil, adında sql geçenleri de bulma) aynen korudum
     sql_file = next((f for f in files if f['name'].endswith('.sql') or 'sql' in f['name'].lower()), None)
     
     if not sql_file:
@@ -147,4 +159,5 @@ def get_sql_file_from_student_folder(service, student_folder_id):
         status, done = downloader.next_chunk()
     fh.seek(0)
     
+    # Çıktı sırası senin kodundakiyle birebir aynı
     return fh.read().decode('utf-8'), sql_file['name']
