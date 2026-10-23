@@ -4,7 +4,8 @@ from raghelper import evaluate_student_sql
 
 st.title("Mentor Cockpit: Öğrenci SQL Ödev Değerlendirme")
 
-PARENT_FOLDER_ID = "1_E3hV4U032hF7TRQFi129XAOyVlgXpWu"
+# BURAYA 2_SQL ANA KLASÖRÜNÜN GERÇEK ID'SİNİ YAPIŞTIRMALISIN
+PARENT_FOLDER_ID = "BURAYA_DOGRU_KLASOR_IDSINI_YAZ"
 
 # Drive servisini çağırıyoruz
 service = get_oauth_drive_service()
@@ -42,7 +43,7 @@ if service:
                 else:
                     st.info("Aradığınız kritere uygun öğrenci bulunamadı.")
         else:
-            st.warning("Klasör altında öğrenci klasörleri bulunamadı. Lütfen klasör izinlerini kontrol edin.")
+            st.warning("Klasör altında öğrenci klasörleri bulunamadı. Lütfen PARENT_FOLDER_ID değerini ve klasör izinlerini kontrol edin.")
     except Exception as e:
         st.error(f"Google Drive bağlantı hatası: {e}")
 else:
