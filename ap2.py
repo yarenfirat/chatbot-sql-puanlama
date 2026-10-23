@@ -4,7 +4,7 @@ from loaders import get_oauth_drive_service, list_student_folders
 st.title("Tek Seferlik Klasör Haritalama (Extractor)")
 
 # BURAYA 2_SQL ANA KLASÖRÜNÜN GERÇEK ID'SİNİ YAZ
-PARENT_FOLDER_ID = "BURAYA_DOGRU_KLASOR_IDSINI_YAZ"
+PARENT_FOLDER_ID = "1_E3hv4U032hF7TRQFI129XAoyVIgXpwU"
 
 service = get_oauth_drive_service()
 
