@@ -35,6 +35,8 @@ def evaluate_student_sql(sql_kodu: str, schema_path="schemas/odev1_sema.txt"):
     2. **SORU BAZLI DEĞERLENDİRME:** (Öğrencinin yazdığı sorguları sırayla ele al; hangileri doğru, hangilerinde hata var tek tek açıkla)
     3. **MENTÖRÜN TAVSİYELERİ:** (Öğrencinin kendini geliştirmesi için kısa öneriler)
 
+    
+    
     ---
     VERİTABANI ŞEMASI:
     {sema_icerigi}
