@@ -34,12 +34,11 @@ def evaluate_student_sql(sql_kodu: str, schema_path="schemas/odev1_sema.txt"):
     
     Lütfen bu kodu dikkatle incele ve yanıtını kesinlikle şu formatta ver:
 
-    1. **TOPLAM PUAN:** [Puanlama asla 100 üzerinden olmayacak. Her soru için puan 1 ya da 0 olacak şekilde değerlendir. Çıktıyı doğru veren her sorguya tam puan (1) ver; 
-    ekonomik/optimal olmayan ama doğru sonuç veren sorgulara da tam puan (1) ver ancak alternatif/daha performanslı bir çözüm için yapıcı uyarıda bulun. 
-    Toplam skoru X/Soru sayısı veya soru başı özet şeklinde belirt]
+    1. **TOPLAM PUAN:** [Ödev toplam 33 sorudan oluşmaktadır. Puanlama 100 üzerinden DEĞİLDİR. 
+    Her doğru soru 1 puandır. Kesinlikle "Doğru Sayısı / 33" formatında (Örn: 33/33, 28/33 gibi) net bir skor yaz.]
     2. **SORU BAZLI DEĞERLENDİRME:** (Öğrencinin yazdığı sorguları sırayla ele al; hangileri doğru, hangilerinde hata var tek tek açıkla)
-    3. **MENTÖRÜN TAVSİYELERİ:** (Öğrencinin kendini geliştirmesi için kısa öneriler)
 
+    3. **MENTÖRÜN TAVSİYELERİ:** (Öğrencinin kendini geliştirmesi için kısa öneriler) 
     
     
     ---
