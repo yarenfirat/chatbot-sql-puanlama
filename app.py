@@ -29,20 +29,11 @@ service = get_oauth_drive_service()
 if service and admin_password_input == correct_password:
   st.sidebar.success("🔓 Yönetici Yetkisi Aktif")
 
-  if st.sidebar.button(
-      "🚀 Eksikleri Tara ve Raporu Güncelle (Akıllı Mod: Varolanı Atlar)"
-  ):
+  if st.sidebar.button("🚀 Tüm Sınıfı Sıfırdan Tara ve Puanları Güncelle"):
     student_folders = list_student_folders()
 
-    # Önceden kaydedilmiş detaylı rapor cache'ini yükleyelim
+    # Cache'i sıfırdan kuruyoruz ki eski yanlış puanlar temizlensin
     cache_data = {}
-    if os.path.exists(CACHE_JSON):
-      try:
-        with open(CACHE_JSON, "r", encoding="utf-8") as f:
-          cache_data = json.load(f)
-      except Exception:
-        pass
-
     results = []
     progress_bar = st.progress(0)
     status_text = st.empty()
@@ -52,21 +43,6 @@ if service and admin_password_input == correct_password:
     for idx, (student_name, folder_id) in enumerate(
         student_folders.items(), start=1
     ):
-      # AKILLI KONTROL: Öğrencinin cache'te zaten geçerli raporu varsa atla!
-      if (
-          student_name in cache_data
-          and cache_data[student_name].get("puan")
-          not in ["Bulunamadı", "Hata", "Ödev Yok"]
-          and not str(cache_data[student_name].get("puan")).startswith("Hata")
-      ):
-        # Sadece Ad ve Puan (CSV/Excel için)
-        results.append({
-            "Öğrenci Adı": student_name,
-            "Puan": cache_data[student_name]["puan"],
-        })
-        progress_bar.progress(idx / total_students)
-        continue
-
       status_text.text(
           f"[{idx}/{total_students}] {student_name} ödevi inceleniyor..."
       )
@@ -78,6 +54,7 @@ if service and admin_password_input == correct_password:
       if sql_kodu:
         try:
           report = evaluate_student_sql(sql_kodu)
+          # Doğru puan formatını yakalayalım
           match = re.search(r"TOPLAM PUAN:\s*([^\n]+)", report, re.IGNORECASE)
           if match:
             puan = match.group(1).strip()
@@ -90,41 +67,40 @@ if service and admin_password_input == correct_password:
         report = f"Dosya durumu: {msg}"
         puan = "Ödev Yok"
 
-      # Cache'e detaylı raporu kaydediyoruz (Tekil arama için)
+      # Detaylı raporu cache'e kaydet (Tekil arama için)
       cache_data[student_name] = {
           "puan": puan,
           "dosya_adi": msg,
           "detayli_rapor": report,
       }
 
-      # CSV ve Excel için SADECE İsim ve Puan ekliyoruz
+      # CSV ve Excel için SADECE İsim ve Puan ekle
       results.append({"Öğrenci Adı": student_name, "Puan": puan})
       progress_bar.progress(idx / total_students)
 
-    # Cache dosyasını güncelle
+    # Yeni cache verisini kaydet
     with open(CACHE_JSON, "w", encoding="utf-8") as f:
       json.dump(cache_data, f, ensure_ascii=False, indent=4)
 
-    # CSV ve Excel dosyalarını SADECE İsim ve Puan içerecek şekilde kaydet
+    # CSV ve Excel dosyalarını sadece İsim ve Puan içerecek şekilde kaydet
     df_results = pd.DataFrame(results)
     df_results.to_csv(output_csv, index=False, encoding="utf-8-sig")
     df_results.to_excel(output_excel, index=False)
 
     status_text.empty()
     progress_bar.empty()
-    st.sidebar.success("🎉 Raporlar güncellendi! CSV ve Excel tertemiz kaydedildi.")
+    st.sidebar.success(
+        "🎉 Tüm sınıf sıfırdan taranarak puanlar ve raporlar güncellendi!"
+    )
     st.rerun()
 elif admin_password_input and admin_password_input != correct_password:
   st.sidebar.error("❌ Hatalı şifre!")
 else:
-  st.sidebar.info(
-      "🔒 Toplu tarama yapmak için yönetici şifresini girin (Sadece eksikler"
-      " taranır)."
-  )
+  st.sidebar.info("🔒 Toplu tarama yapmak için yönetici şifresini girin.")
 
 st.sidebar.markdown("---")
 
-# İndirme Butonları (İndirilen dosyalarda sadece İsim ve Puan yazar)
+# İndirme Butonları (Sadece İsim ve Puan yazar)
 if os.path.exists(output_excel) and os.path.exists(output_csv):
   with open(output_excel, "rb") as f:
     excel_bytes = f.read()
@@ -145,7 +121,7 @@ if os.path.exists(output_excel) and os.path.exists(output_csv):
       label="📄 Tüm Sınıfı CSV İndir (İsim ve Puan)",
       data=csv_bytes,
       file_name="tum_ogrenci_sql_puanlari.csv",
-      mime="text/csv",
+      mime="text/css",
   )
   st.sidebar.success("✅ İndirme dosyaları hazır.")
 else:
@@ -153,7 +129,7 @@ else:
 
 st.sidebar.markdown("---")
 
-# --- ANA EKRAN: TEKLİ ARAMA (DETAYLI RAPORLAR CACHE'TEN GELİR, TOKEN YAKMAZ) ---
+# --- ANA EKRAN: TEKLİ ARAMA (DETAYLI RAPORLAR CACHE'TEN GELİR) ---
 st.subheader("🔍 Öğrenci Detaylı Rapor Sorgulama")
 
 student_folders = list_student_folders()
@@ -173,7 +149,6 @@ if search_query:
         "Eşleşen Öğrenciler:", list(matched_students.keys())
     )
 
-    # Gizli cache'ten (veya CSV'den bağımsız arka plan verisinden) detaylı raporu çekelim
     cache_data = {}
     if os.path.exists(CACHE_JSON):
       try:
@@ -184,7 +159,10 @@ if search_query:
 
     if selected_student in cache_data:
       student_info = cache_data[selected_student]
-      st.success(f"✅ Öğrenci Raporu Yüklendi (Dosya: {student_info.get('dosya_adi', '-')})")
+      st.success(
+          f"✅ Öğrenci Raporu Yüklendi (Dosya:"
+          f" {student_info.get('dosya_adi', '-')})"
+      )
       st.info(f"**Öğrenci Adı:** {selected_student}")
       st.info(f"**Puan:** {student_info.get('puan', '-')}")
 
@@ -193,23 +171,8 @@ if search_query:
       st.markdown(student_info.get("detayli_rapor", "Rapor bulunamadı."))
     else:
       st.warning(
-          "⚠️ Bu öğrenci henüz taranmamış. Toplu tarama yapıldığında detayları buraya gelecektir."
+          "⚠️ Bu öğrenci henüz taranmamış. Toplu tarama yapıldığında detayları"
+          " buraya gelecektir."
       )
-      if service and st.button("Anlık Olarak Tekrar Değerlendir (Token Harcar)"):
-        student_folder_id = matched_students[selected_student]
-        with st.spinner(f"{selected_student} ödevi Drive'dan inceleniyor..."):
-          sql_kodu, file_name = get_sql_file_from_student_folder(
-              service, student_folder_id
-          )
-          if sql_kodu:
-            st.success(f"Başarılı! Bulunan Dosya: {file_name}")
-            report = evaluate_student_sql(sql_kodu)
-            st.markdown(report)
-            with st.expander("Orijinal SQL Kodunu Gör"):
-              st.code(sql_kodu, language="sql")
-          else:
-            st.warning(file_name)
-      elif not service:
-        st.info("Tekli anlık tarama için lütfen Google ile giriş yapın.")
   else:
     st.info("Aradığınız kritere uygun öğrenci bulunamadı.")
