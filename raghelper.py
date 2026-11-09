@@ -28,19 +28,20 @@ def evaluate_student_sql(sql_kodu: str, schema_path="schemas/odev1_sema.txt"):
         + "\n\n[... Kod çok uzun olduğu için son kısım kırpıldı ...]"
     )
 
-  final_prompt = f"""
+    final_prompt = f"""
     Sen kıdemli ve titiz bir veri analitiği mentörüsün. 
-    Aşağıda veritabanı şeması ve bu şemaya göre öğrencinin yazdığı SQL sorguları veriliyor. 
+    Aşağıda veritabanı şeması ve öğrencinin yazdığı SQL sorguları veriliyor. 
     
-    Lütfen bu kodu dikkatle incele ve yanıtını kesinlikle şu formatta ver:
+    Ödev TOPLAM 33 SORUDAN oluşmaktadır. Puanlama kesinlikle 33 üzerinden yapılmalıdır (100 üzerinden DEĞİL).
+    Her doğru ve geçerli çalışan sorgu 1 puandır.
 
-    1. **TOPLAM PUAN:** [Ödev toplam 33 sorudan oluşmaktadır. Puanlama 100 üzerinden DEĞİLDİR. 
-    Her doğru soru 1 puandır. Kesinlikle "Doğru Sayısı / 33" formatında (Örn: 33/33, 28/33 gibi) net bir skor yaz.]
-    2. **SORU BAZLI DEĞERLENDİRME:** (Öğrencinin yazdığı sorguları sırayla ele al; hangileri doğru, hangilerinde hata var tek tek açıkla)
+    Yanıtını KESİNLİKLE şu formatta ver:
 
-    3. **MENTÖRÜN TAVSİYELERİ:** (Öğrencinin kendini geliştirmesi için kısa öneriler) 
-    
-    
+    1. **TOPLAM PUAN:** X/33
+    (NOT: Buraya sadece ve sadece X/33 formatında skor yaz. Kesinlikle parantez içi açıklama, yorum veya metin EKLEME.)
+    2. **SORU BAZLI DEĞERLENDİRME:** (Öğrencinin yazdığı sorguları sırayla ele al; hangileri doğru, hangilerinde hata var açıkla)
+    3. **MENTÖRÜN TAVSİYELERİ:** (Öğrencinin kendini geliştirmesi için kısa öneriler)
+
     ---
     VERİTABANI ŞEMASI:
     {sema_icerigi}
