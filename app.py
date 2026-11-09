@@ -10,7 +10,7 @@ from loaders import (
 )
 from raghelper import evaluate_student_sql
 
-# Sayfa yapılandırması
+st.set_page_config(page_title="Mentor Cockpit", layout="wide")
 st.title("Mentor Cockpit: Öğrenci SQL Ödev Değerlendirme")
 
 output_excel = "tum_ogrenci_sql_puanlari.xlsx"
@@ -60,7 +60,6 @@ correct_password = st.secrets.get("admin_password", "miuul2026")
 
 service = None
 
-# Google Drive yetkilendirmesi SADECE doğru şifre girildiğinde ve SOL MENÜDE devreye girer
 if admin_password_input == correct_password:
   st.sidebar.success("🔓 Yönetici Girişi Yapıldı")
 
@@ -68,6 +67,7 @@ if admin_password_input == correct_password:
     service = get_oauth_drive_service()
 
   if service:
+    # 1. BUTON: TOPLU TARAMA VE GÜNCELLEME
     if st.sidebar.button(
         "🚀 Eksikleri Tara ve Güncelle (Notu Olanlar Atlanır)"
     ):
@@ -94,7 +94,6 @@ if admin_password_input == correct_password:
       ):
         mevcut_puan = cache_data.get(student_name, {}).get("puan", "")
 
-        # Notu zaten X/33 olanları tek kuruş harcamadan atla
         if re.match(r"^\d+/33$", str(mevcut_puan)):
           atlanansayisi += 1
           results.append({"Öğrenci Adı": student_name, "Puan": mevcut_puan})
@@ -140,10 +139,54 @@ if admin_password_input == correct_password:
       )
       st.rerun()
 
+    # 2. BUTON: SIFIR TOKEN İLE EKSİK SQL KODLARINI DRİVE'DAN ÇEKME
+    if st.sidebar.button(
+        "📥 Eksik SQL Kodlarını Drive'dan Çek (0 Token - Bedava)"
+    ):
+      student_folders = list_student_folders()
+      cache_data = {}
+      if os.path.exists(CACHE_JSON):
+        try:
+          with open(CACHE_JSON, "r", encoding="utf-8") as f:
+            cache_data = json.load(f)
+        except Exception:
+          pass
+
+      progress_bar = st.sidebar.progress(0)
+      status_text = st.sidebar.empty()
+      total_students = len(student_folders)
+      guncellenen = 0
+
+      for idx, (student_name, folder_id) in enumerate(
+          student_folders.items(), start=1
+      ):
+        # Sadece SQL kodu olmayanların kodunu Drive'dan bedavaya alıyoruz
+        if student_name in cache_data and not cache_data[student_name].get(
+            "sql_kodu"
+        ):
+          status_text.text(
+              f"[{idx}/{total_students}] {student_name} SQL kodu alınıyor..."
+          )
+          sql_kodu, _ = get_sql_file_from_student_folder(service, folder_id)
+          if sql_kodu:
+            cache_data[student_name]["sql_kodu"] = sql_kodu
+            guncellenen += 1
+        progress_bar.progress(idx / total_students)
+
+      with open(CACHE_JSON, "w", encoding="utf-8") as f:
+        json.dump(cache_data, f, ensure_ascii=False, indent=4)
+
+      status_text.empty()
+      progress_bar.empty()
+      st.sidebar.success(
+          f"✅ {guncellenen} öğrencinin SQL kodu hafızaya kaydedildi!"
+      )
+      st.rerun()
+
 elif admin_password_input and admin_password_input != correct_password:
   st.sidebar.error("❌ Hatalı şifre!")
 else:
-  st.sidebar.info("🔒 Toplu tarama yapmak için yönetici şifresini girin.")
+  st.sidebar.info("🔒 Yönetici paneli için şifreyi giriniz.")
 
 st.sidebar.markdown("---")
 
@@ -174,7 +217,7 @@ else:
 
 
 # ==========================================
-# ANA EKRAN: TEKİL ARAMA (TAMAMEN SADE VE TEMİZ)
+# ANA EKRAN: TEKİL ARAMA (SADECE CACHE'TEN OKUR)
 # ==========================================
 st.subheader("🔍 Öğrenci Detaylı Rapor Sorgulama")
 
@@ -226,14 +269,34 @@ if search_query:
       )
       st.markdown(duzeltilmis_rapor)
 
+      # ÖĞRENCİNİN SQL KODUNU GÖSTERME
       ogrenci_sql = student_info.get("sql_kodu")
+
+      # Eğer hafızada yoksa ve anlık olarak yönetici girişi yapılmışsa doğrudan Drive'dan tamamla
+      if not ogrenci_sql and service:
+        folder_id = matched_students.get(selected_student)
+        if folder_id:
+          cekilen_sql, _ = get_sql_file_from_student_folder(service, folder_id)
+          if cekilen_sql:
+            ogrenci_sql = cekilen_sql
+            student_info["sql_kodu"] = ogrenci_sql
+            with open(CACHE_JSON, "w", encoding="utf-8") as f:
+              json.dump(cache_data, f, ensure_ascii=False, indent=4)
+
+      st.markdown("---")
       if ogrenci_sql:
-        with st.expander("📄 Öğrencinin Yüklediği Orijinal SQL Kodunu Gör"):
+        with st.expander(
+            "📄 Öğrencinin Yüklediği Orijinal SQL Kodunu Gör", expanded=True
+        ):
           st.code(ogrenci_sql, language="sql")
+      else:
+        st.warning(
+            "ℹ️ Bu öğrencinin SQL kodu henüz önbelleğe aktarılmamış. Sol menüden"
+            " 'Eksik SQL Kodlarını Drive'dan Çek' butonuna basarak 0 maliyetle"
+            " önbelleğe alabilirsiniz."
+        )
+
     else:
-      st.warning(
-          "⚠️ Bu öğrenci için önceden taranmış bir rapor bulunamadı. Yönetici"
-          " sol menüden toplu tarama yapabilir."
-      )
+      st.warning("⚠️ Bu öğrenci henüz taranmamış.")
   else:
     st.info("Aradığınız kritere uygun öğrenci bulunamadı.")
