@@ -13,13 +13,14 @@ st.title("Mentor Cockpit: Öğrenci SQL Ödev Değerlendirme")
 output_excel = "tum_ogrenci_sql_puanlari.xlsx"
 output_csv = "tum_ogrenci_sql_puanlari.csv"
 
-# --- SOL MENÜ: TOPLU RAPOR YÖNETİMİ VE TARAMA BUTONU ---
+# --- SOL MENÜ: TOPLU RAPOR YÖNETİMİ ---
 st.sidebar.subheader("📊 Toplu Rapor Yönetimi")
 
-# Google servisini almayı dene
 service = get_oauth_drive_service()
 
 if service:
+  st.sidebar.success("✅ Google Drive Bağlantısı Aktif")
+
   if st.sidebar.button("🚀 Tüm Sınıfı Tara ve Raporu Güncelle"):
     student_folders = list_student_folders()
     results = []
@@ -37,13 +38,23 @@ if service:
       sql_kodu, msg = get_sql_file_from_student_folder(service, folder_id)
 
       if sql_kodu:
-        report = evaluate_student_sql(sql_kodu)
-        results.append({
-            "Öğrenci Adı": student_name,
-            "Dosya Adı": msg,
-            "Durum": "Başarılı",
-            "Değerlendirme Raporu": report,
-        })
+        try:
+          # OpenAI / Model çağrısı güvenli blok içine alındı
+          report = evaluate_student_sql(sql_kodu)
+          results.append({
+              "Öğrenci Adı": student_name,
+              "Dosya Adı": msg,
+              "Durum": "Başarılı",
+              "Değerlendirme Raporu": report,
+          })
+        except Exception as api_err:
+          # Model veya token hatası olursa döngü çökmez, hatayı kaydeder ve devam eder
+          results.append({
+              "Öğrenci Adı": student_name,
+              "Dosya Adı": msg,
+              "Durum": "API / Model Hatası",
+              "Değerlendirme Raporu": f"Hata Detayı: {str(api_err)}",
+          })
       else:
         results.append({
             "Öğrenci Adı": student_name,
@@ -60,16 +71,19 @@ if service:
 
     status_text.empty()
     progress_bar.empty()
-    st.sidebar.success("🎉 Tüm sınıf başarıyla tarandı ve rapor kaydedildi!")
+    st.sidebar.success(
+        "🎉 Tüm sınıf taraması tamamlandı ve raporlar kaydedildi!"
+    )
     st.rerun()
 else:
   st.sidebar.warning(
-      "⚠️ Google Drive bağlantısı bekleniyor. Lütfen önce giriş yapın."
+      "⚠️ Lütfen sağdaki ekrandan 'Google ile Giriş Yap' butonuna basarak"
+      " yetkilendirmeyi tamamlayın."
   )
 
 st.sidebar.markdown("---")
 
-# Rapor dosyaları diskte var mı kontrol et ve indirme butonlarını göster
+# Rapor indirme butonları
 if os.path.exists(output_excel) and os.path.exists(output_csv):
   with open(output_excel, "rb") as f:
     excel_bytes = f.read()
@@ -95,8 +109,8 @@ if os.path.exists(output_excel) and os.path.exists(output_csv):
   st.sidebar.success("✅ Toplu raporlar indirilmeye hazır.")
 else:
   st.sidebar.info(
-      "ℹ️ Henüz toplu tarama dosyası oluşturulmamış. Yukarıdaki butona basarak"
-      " tarama yapabilirsiniz."
+      "ℹ️ Henüz toplu tarama dosyası oluşturulmamış. Giriş yaptıktan sonra"
+      " yukarıdaki butona basarak tarama yapabilirsiniz."
   )
 
 st.sidebar.markdown("---")
@@ -131,14 +145,19 @@ if service:
           )
 
           if sql_kodu:
-            st.success(f"Başarılı! Bulunan Dosya: {file_name}")
-            report = evaluate_student_sql(sql_kodu)
-            st.markdown(report)
-            with st.expander("Öğrencinin Orijinal SQL Kodunu Gör"):
-              st.code(sql_kodu, language="sql")
+            try:
+              st.success(f"Başarılı! Bulunan Dosya: {file_name}")
+              report = evaluate_student_sql(sql_kodu)
+              st.markdown(report)
+              with st.expander("Öğrencinin Orijinal SQL Kodunu Gör"):
+                st.code(sql_kodu, language="sql")
+            except Exception as e:
+              st.error(
+                  f"Model değerlendirmesi sırasında bir hata oluştu: {e}"
+              )
           else:
             st.warning(file_name)
     else:
       st.info("Aradığınız kritere uygun öğrenci bulunamadı.")
 else:
-  st.info("Google Drive'da bağlanmak için lütfen yetkilendirmeyi tamamlayın.")
+  st.info("👈 Devam etmek için lütfen sağdaki 'Google ile Giriş Yap' butonuna basın.")
