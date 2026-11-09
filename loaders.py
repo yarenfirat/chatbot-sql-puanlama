@@ -168,16 +168,15 @@ def list_student_folders():
 
 def get_sql_file_from_student_folder(service, student_folder_id):
   try:
-    query = (
-        f"'{student_folder_id}' in parents and name contains '.sql' and"
-        " trashed=false"
-    )
+    # 1. Klasördeki tüm dosyaları ve MIME tiplerini listele
+    query = f"'{student_folder_id}' in parents and trashed=false"
     response = (
         service.files()
         .list(
             q=query,
             spaces="drive",
-            fields="files(id, name)",
+            fields="files(id, name, mimeType)",
+            pageSize=30,
             supportsAllDrives=True,
             includeItemsFromAllDrives=True,
         )
@@ -186,14 +185,30 @@ def get_sql_file_from_student_folder(service, student_folder_id):
 
     files = response.get("files", [])
     if not files:
-      return (
-          None,
-          "Bu öğrencinin klasöründe .sql uzantılı ödev dosyası bulunamadı.",
-      )
+      return None, "Klasör boş."
 
-    file_id = files[0].get("id")
-    file_name = files[0].get("name")
+    # 2. SADECE GERÇEK .SQL DOSYASINI BUL (Google Docs/Sheets/Slides'ı doğrudan ele)
+    target_file = None
+    for f in files:
+      file_name_lower = f.get("name", "").lower()
+      mime_type = f.get("mimeType", "")
 
+      # Google Dokümanı ise ASLA alma
+      if mime_type.startswith("application/vnd.google-apps"):
+        continue
+
+      # Adı .sql ile biten veya içinde .sql geçen gerçek dosyayı seç
+      if file_name_lower.endswith(".sql") or ".sql" in file_name_lower:
+        target_file = f
+        break
+
+    if not target_file:
+      return None, "Klasörde .sql uzantılı ödev dosyası bulunamadı."
+
+    file_id = target_file.get("id")
+    file_name = target_file.get("name")
+
+    # 3. İndirme işlemi
     request = service.files().get_media(fileId=file_id)
     fh = io.BytesIO()
     downloader = MediaIoBaseDownload(fh, request)
@@ -202,7 +217,14 @@ def get_sql_file_from_student_folder(service, student_folder_id):
     while not done:
       status, done = downloader.next_chunk()
 
-    fh.seek(0)
-    return fh.read().decode("utf-8", errors="replace"), file_name
+    # SSMS Türkçe karakter desteği
+    content_bytes = fh.getvalue()
+    try:
+      sql_content = content_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+      sql_content = content_bytes.decode("windows-1254", errors="ignore")
+
+    return sql_content, file_name
+
   except Exception as e:
     return None, f"Dosya okuma hatası: {e}"
