@@ -28,12 +28,18 @@ def evaluate_student_sql(sql_kodu: str, schema_path="schemas/odev1_sema.txt"):
         + "\n\n[... Kod çok uzun olduğu için son kısım kırpıldı ...]"
     )
 
+
+
+
+
+
     final_prompt = f"""
     Sen kıdemli ve titiz bir veri analitiği mentörüsün. 
+
     Aşağıda veritabanı şeması ve öğrencinin yazdığı SQL sorguları veriliyor. 
     
     Ödev TOPLAM 33 SORUDAN oluşmaktadır. Puanlama kesinlikle 33 üzerinden yapılmalıdır (100 üzerinden DEĞİL).
-    Her doğru ve geçerli çalışan sorgu 1 puandır.
+    Her doğru ve geçerli çalışan sorgu 1 puandır yanlış ya da boş bırakılan sorular ise 0 puan alır.
 
     Yanıtını KESİNLİKLE şu formatta ver:
 
