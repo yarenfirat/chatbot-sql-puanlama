@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import pandas as pd
@@ -13,6 +14,7 @@ st.title("Mentor Cockpit: Öğrenci SQL Ödev Değerlendirme")
 
 output_excel = "tum_ogrenci_sql_puanlari.xlsx"
 output_csv = "tum_ogrenci_sql_puanlari.csv"
+CACHE_JSON = "rapor_cache.json"
 
 # --- SOL MENÜ: TOPLU RAPOR YÖNETİMİ & YETKİ ---
 st.sidebar.subheader("📊 Toplu Rapor Yönetimi")
@@ -24,12 +26,23 @@ correct_password = st.secrets.get("admin_password", "miuul2026")
 
 service = get_oauth_drive_service()
 
-# Toplu tarama sadece yönetici şifresi doğruysa ve Drive servisi varsa çalışır
 if service and admin_password_input == correct_password:
   st.sidebar.success("🔓 Yönetici Yetkisi Aktif")
 
-  if st.sidebar.button("🚀 Tüm Sınıfı Tara ve Raporu Güncelle (Token Harcar)"):
+  if st.sidebar.button(
+      "🚀 Eksikleri Tara ve Raporu Güncelle (Akıllı Mod: Varolanı Atlar)"
+  ):
     student_folders = list_student_folders()
+
+    # Önceden kaydedilmiş detaylı rapor cache'ini yükleyelim
+    cache_data = {}
+    if os.path.exists(CACHE_JSON):
+      try:
+        with open(CACHE_JSON, "r", encoding="utf-8") as f:
+          cache_data = json.load(f)
+      except Exception:
+        pass
+
     results = []
     progress_bar = st.progress(0)
     status_text = st.empty()
@@ -39,55 +52,85 @@ if service and admin_password_input == correct_password:
     for idx, (student_name, folder_id) in enumerate(
         student_folders.items(), start=1
     ):
+      # AKILLI KONTROL: Öğrencinin cache'te zaten geçerli raporu varsa atla!
+      if (
+          student_name in cache_data
+          and cache_data[student_name].get("puan")
+          not in ["Bulunamadı", "Hata", "Ödev Yok"]
+          and not str(cache_data[student_name].get("puan")).startswith("Hata")
+      ):
+        # Sadece Ad ve Puan (CSV/Excel için)
+        results.append({
+            "Öğrenci Adı": student_name,
+            "Puan": cache_data[student_name]["puan"],
+        })
+        progress_bar.progress(idx / total_students)
+        continue
+
       status_text.text(
           f"[{idx}/{total_students}] {student_name} ödevi inceleniyor..."
       )
       sql_kodu, msg = get_sql_file_from_student_folder(service, folder_id)
 
       puan = "Bulunamadı"
+      report = "Ödev Bulunamadı veya İncelenemedi."
+
       if sql_kodu:
         try:
           report = evaluate_student_sql(sql_kodu)
-          # Rapordan sadece puanı ayıklıyoruz
           match = re.search(r"TOPLAM PUAN:\s*([^\n]+)", report, re.IGNORECASE)
           if match:
             puan = match.group(1).strip()
           else:
             puan = "Değerlendirildi"
         except Exception as api_err:
-          puan = f"Hata: {str(api_err)}"
+          report = f"Hata Detayı: {str(api_err)}"
+          puan = "Hata"
       else:
-        puan = f"Ödev Yok ({msg})"
+        report = f"Dosya durumu: {msg}"
+        puan = "Ödev Yok"
 
-      # SADECE AD VE PUAN KAYDEDİLİYOR
+      # Cache'e detaylı raporu kaydediyoruz (Tekil arama için)
+      cache_data[student_name] = {
+          "puan": puan,
+          "dosya_adi": msg,
+          "detayli_rapor": report,
+      }
+
+      # CSV ve Excel için SADECE İsim ve Puan ekliyoruz
       results.append({"Öğrenci Adı": student_name, "Puan": puan})
-
       progress_bar.progress(idx / total_students)
 
+    # Cache dosyasını güncelle
+    with open(CACHE_JSON, "w", encoding="utf-8") as f:
+      json.dump(cache_data, f, ensure_ascii=False, indent=4)
+
+    # CSV ve Excel dosyalarını SADECE İsim ve Puan içerecek şekilde kaydet
     df_results = pd.DataFrame(results)
     df_results.to_csv(output_csv, index=False, encoding="utf-8-sig")
     df_results.to_excel(output_excel, index=False)
 
     status_text.empty()
     progress_bar.empty()
-    st.sidebar.success("🎉 Raporlar güncellendi ve kaydedildi!")
+    st.sidebar.success("🎉 Raporlar güncellendi! CSV ve Excel tertemiz kaydedildi.")
     st.rerun()
 elif admin_password_input and admin_password_input != correct_password:
   st.sidebar.error("❌ Hatalı şifre!")
 else:
   st.sidebar.info(
-      "🔒 Toplu tarama (yeniden puanlama) yapmak için yönetici şifresi gerekir."
+      "🔒 Toplu tarama yapmak için yönetici şifresini girin (Sadece eksikler"
+      " taranır)."
   )
 
 st.sidebar.markdown("---")
 
-# Kayıtlı Rapor İndirme Butonları (Herkes indirebilir)
+# İndirme Butonları (İndirilen dosyalarda sadece İsim ve Puan yazar)
 if os.path.exists(output_excel) and os.path.exists(output_csv):
   with open(output_excel, "rb") as f:
     excel_bytes = f.read()
 
   st.sidebar.download_button(
-      label="📊 Tüm Sınıfı Excel İndir (.xlsx)",
+      label="📊 Tüm Sınıfı Excel İndir (İsim ve Puan)",
       data=excel_bytes,
       file_name="tum_ogrenci_sql_puanlari.xlsx",
       mime=(
@@ -99,19 +142,19 @@ if os.path.exists(output_excel) and os.path.exists(output_csv):
     csv_bytes = f.read()
 
   st.sidebar.download_button(
-      label="📄 Tüm Sınıfı CSV İndir (.csv)",
+      label="📄 Tüm Sınıfı CSV İndir (İsim ve Puan)",
       data=csv_bytes,
       file_name="tum_ogrenci_sql_puanlari.csv",
       mime="text/csv",
   )
-  st.sidebar.success("✅ Toplu raporlar indirilmeye hazır.")
+  st.sidebar.success("✅ İndirme dosyaları hazır.")
 else:
-  st.sidebar.info("ℹ️ Henüz toplu tarama dosyası oluşturulmamış.")
+  st.sidebar.info("ℹ️ Henüz toplu tarama yapılmamış.")
 
 st.sidebar.markdown("---")
 
-# --- ANA EKRAN: TEKLİ ARAMA (ÖNCE KAYITLI CSV'YE BAKAR, TOKEN HARCANMAZ) ---
-st.subheader("🔍 Öğrenci Puan / Rapor Sorgulama")
+# --- ANA EKRAN: TEKLİ ARAMA (DETAYLI RAPORLAR CACHE'TEN GELİR, TOKEN YAKMAZ) ---
+st.subheader("🔍 Öğrenci Detaylı Rapor Sorgulama")
 
 student_folders = list_student_folders()
 search_query = st.text_input(
@@ -130,20 +173,27 @@ if search_query:
         "Eşleşen Öğrenciler:", list(matched_students.keys())
     )
 
-    saved_report_found = False
-    if os.path.exists(output_csv):
-      df_saved = pd.read_csv(output_csv)
-      student_row = df_saved[df_saved["Öğrenci Adı"] == selected_student]
-      if not student_row.empty:
-        saved_report_found = True
-        row_data = student_row.iloc[0]
-        st.success(f"✅ Kayıtlı Öğrenci Puanı Bulundu")
-        st.info(f"**Öğrenci Adı:** {row_data['Öğrenci Adı']}")
-        st.info(f"**Puan / Durum:** {row_data['Puan']}")
+    # Gizli cache'ten (veya CSV'den bağımsız arka plan verisinden) detaylı raporu çekelim
+    cache_data = {}
+    if os.path.exists(CACHE_JSON):
+      try:
+        with open(CACHE_JSON, "r", encoding="utf-8") as f:
+          cache_data = json.load(f)
+      except Exception:
+        pass
 
-    if not saved_report_found:
+    if selected_student in cache_data:
+      student_info = cache_data[selected_student]
+      st.success(f"✅ Öğrenci Raporu Yüklendi (Dosya: {student_info.get('dosya_adi', '-')})")
+      st.info(f"**Öğrenci Adı:** {selected_student}")
+      st.info(f"**Puan:** {student_info.get('puan', '-')}")
+
+      st.markdown("---")
+      st.markdown("### 📝 Detaylı Değerlendirme Raporu")
+      st.markdown(student_info.get("detayli_rapor", "Rapor bulunamadı."))
+    else:
       st.warning(
-          "⚠️ Bu öğrenci daha önce toplu taranmamış veya raporda bulunamadı."
+          "⚠️ Bu öğrenci henüz taranmamış. Toplu tarama yapıldığında detayları buraya gelecektir."
       )
       if service and st.button("Anlık Olarak Tekrar Değerlendir (Token Harcar)"):
         student_folder_id = matched_students[selected_student]
