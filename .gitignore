@@ -1,2 +1,7 @@
 .streamlit/secrets.toml
 .env
+venv/
+__pycache__/
+*.pyc
+tum_ogrenci_sql_puanlari.xlsx
+tum_ogrenci_sql_puanlari.csv
