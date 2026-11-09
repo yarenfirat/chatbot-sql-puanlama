@@ -94,7 +94,7 @@ if admin_password_input == correct_password:
       ):
         mevcut_puan = cache_data.get(student_name, {}).get("puan", "")
 
-        if re.match(r"^\d+/33$", str(mevcut_puan)):
+        if re.match(r"^\d+/33$", str(mevcut_puan)) and mevcut_puan != "0/33":
           atlanansayisi += 1
           results.append({"Öğrenci Adı": student_name, "Puan": mevcut_puan})
           progress_bar.progress(idx / total_students)
