@@ -10,14 +10,67 @@ from raghelper import evaluate_student_sql
 
 st.title("Mentor Cockpit: Öğrenci SQL Ödev Değerlendirme")
 
-# --- SOL MENÜ: TOPLU RAPORLARI İNDİR ---
-st.sidebar.subheader("📊 Toplu Raporlar")
 output_excel = "tum_ogrenci_sql_puanlari.xlsx"
 output_csv = "tum_ogrenci_sql_puanlari.csv"
 
-# Eğer run_batch.py çalıştırılmışsa ve dosyalar klasörde varsa butonları göster
+# --- SOL MENÜ: TOPLU RAPOR YÖNETİMİ VE TARAMA BUTONU ---
+st.sidebar.subheader("📊 Toplu Rapor Yönetimi")
+
+# Google servisini almayı dene
+service = get_oauth_drive_service()
+
+if service:
+  if st.sidebar.button("🚀 Tüm Sınıfı Tara ve Raporu Güncelle"):
+    student_folders = list_student_folders()
+    results = []
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+
+    total_students = len(student_folders)
+
+    for idx, (student_name, folder_id) in enumerate(
+        student_folders.items(), start=1
+    ):
+      status_text.text(
+          f"[{idx}/{total_students}] {student_name} ödevi inceleniyor..."
+      )
+      sql_kodu, msg = get_sql_file_from_student_folder(service, folder_id)
+
+      if sql_kodu:
+        report = evaluate_student_sql(sql_kodu)
+        results.append({
+            "Öğrenci Adı": student_name,
+            "Dosya Adı": msg,
+            "Durum": "Başarılı",
+            "Değerlendirme Raporu": report,
+        })
+      else:
+        results.append({
+            "Öğrenci Adı": student_name,
+            "Dosya Adı": "-",
+            "Durum": msg,
+            "Değerlendirme Raporu": "Ödev Bulunamadı",
+        })
+
+      progress_bar.progress(idx / total_students)
+
+    df_results = pd.DataFrame(results)
+    df_results.to_csv(output_csv, index=False, encoding="utf-8-sig")
+    df_results.to_excel(output_excel, index=False)
+
+    status_text.empty()
+    progress_bar.empty()
+    st.sidebar.success("🎉 Tüm sınıf başarıyla tarandı ve rapor kaydedildi!")
+    st.rerun()
+else:
+  st.sidebar.warning(
+      "⚠️ Google Drive bağlantısı bekleniyor. Lütfen önce giriş yapın."
+  )
+
+st.sidebar.markdown("---")
+
+# Rapor dosyaları diskte var mı kontrol et ve indirme butonlarını göster
 if os.path.exists(output_excel) and os.path.exists(output_csv):
-  # Excel dosyasını okumaya hazırla
   with open(output_excel, "rb") as f:
     excel_bytes = f.read()
 
@@ -30,7 +83,6 @@ if os.path.exists(output_excel) and os.path.exists(output_csv):
       ),
   )
 
-  # CSV dosyasını okumaya hazırla
   with open(output_csv, "rb") as f:
     csv_bytes = f.read()
 
@@ -40,21 +92,16 @@ if os.path.exists(output_excel) and os.path.exists(output_csv):
       file_name="tum_ogrenci_sql_puanlari.csv",
       mime="text/csv",
   )
-  st.sidebar.success(
-      "✅ Toplu raporlar hazır. (Terminalden güncelledikçe buradaki butonlar da"
-      " güncellenir)"
-  )
+  st.sidebar.success("✅ Toplu raporlar indirilmeye hazır.")
 else:
   st.sidebar.info(
-      "ℹ️ Henüz toplu tarama yapılmamış. Toplu raporları indirmek için terminalde"
-      " `python run_batch.py` çalıştırın."
+      "ℹ️ Henüz toplu tarama dosyası oluşturulmamış. Yukarıdaki butona basarak"
+      " tarama yapabilirsiniz."
   )
 
 st.sidebar.markdown("---")
 
 # --- ANA EKRAN: TEKLİ ARAMA VE DEĞERLENDİRME ---
-service = get_oauth_drive_service()
-
 if service:
   student_folders = list_student_folders()
 
