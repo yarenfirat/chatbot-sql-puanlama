@@ -1,4 +1,5 @@
 import os
+import re
 import pandas as pd
 import streamlit as st
 from loaders import (
@@ -13,15 +14,21 @@ st.title("Mentor Cockpit: Öğrenci SQL Ödev Değerlendirme")
 output_excel = "tum_ogrenci_sql_puanlari.xlsx"
 output_csv = "tum_ogrenci_sql_puanlari.csv"
 
-# --- SOL MENÜ: TOPLU RAPOR YÖNETİMİ ---
+# --- SOL MENÜ: TOPLU RAPOR YÖNETİMİ & YETKİ ---
 st.sidebar.subheader("📊 Toplu Rapor Yönetimi")
+
+admin_password_input = st.sidebar.text_input(
+    "🔑 Yönetici Şifresi", type="password", placeholder="Şifreyi giriniz..."
+)
+correct_password = st.secrets.get("admin_password", "miuul2026")
 
 service = get_oauth_drive_service()
 
-if service:
-  st.sidebar.success("✅ Google Drive Bağlantısı Aktif")
+# Toplu tarama sadece yönetici şifresi doğruysa ve Drive servisi varsa çalışır
+if service and admin_password_input == correct_password:
+  st.sidebar.success("🔓 Yönetici Yetkisi Aktif")
 
-  if st.sidebar.button("🚀 Tüm Sınıfı Tara ve Raporu Güncelle"):
+  if st.sidebar.button("🚀 Tüm Sınıfı Tara ve Raporu Güncelle (Token Harcar)"):
     student_folders = list_student_folders()
     results = []
     progress_bar = st.progress(0)
@@ -37,31 +44,23 @@ if service:
       )
       sql_kodu, msg = get_sql_file_from_student_folder(service, folder_id)
 
+      puan = "Bulunamadı"
       if sql_kodu:
         try:
-          # OpenAI / Model çağrısı güvenli blok içine alındı
           report = evaluate_student_sql(sql_kodu)
-          results.append({
-              "Öğrenci Adı": student_name,
-              "Dosya Adı": msg,
-              "Durum": "Başarılı",
-              "Değerlendirme Raporu": report,
-          })
+          # Rapordan sadece puanı ayıklıyoruz
+          match = re.search(r"TOPLAM PUAN:\s*([^\n]+)", report, re.IGNORECASE)
+          if match:
+            puan = match.group(1).strip()
+          else:
+            puan = "Değerlendirildi"
         except Exception as api_err:
-          # Model veya token hatası olursa döngü çökmez, hatayı kaydeder ve devam eder
-          results.append({
-              "Öğrenci Adı": student_name,
-              "Dosya Adı": msg,
-              "Durum": "API / Model Hatası",
-              "Değerlendirme Raporu": f"Hata Detayı: {str(api_err)}",
-          })
+          puan = f"Hata: {str(api_err)}"
       else:
-        results.append({
-            "Öğrenci Adı": student_name,
-            "Dosya Adı": "-",
-            "Durum": msg,
-            "Değerlendirme Raporu": "Ödev Bulunamadı",
-        })
+        puan = f"Ödev Yok ({msg})"
+
+      # SADECE AD VE PUAN KAYDEDİLİYOR
+      results.append({"Öğrenci Adı": student_name, "Puan": puan})
 
       progress_bar.progress(idx / total_students)
 
@@ -71,19 +70,18 @@ if service:
 
     status_text.empty()
     progress_bar.empty()
-    st.sidebar.success(
-        "🎉 Tüm sınıf taraması tamamlandı ve raporlar kaydedildi!"
-    )
+    st.sidebar.success("🎉 Raporlar güncellendi ve kaydedildi!")
     st.rerun()
+elif admin_password_input and admin_password_input != correct_password:
+  st.sidebar.error("❌ Hatalı şifre!")
 else:
-  st.sidebar.warning(
-      "⚠️ Lütfen sağdaki ekrandan 'Google ile Giriş Yap' butonuna basarak"
-      " yetkilendirmeyi tamamlayın."
+  st.sidebar.info(
+      "🔒 Toplu tarama (yeniden puanlama) yapmak için yönetici şifresi gerekir."
   )
 
 st.sidebar.markdown("---")
 
-# Rapor indirme butonları
+# Kayıtlı Rapor İndirme Butonları (Herkes indirebilir)
 if os.path.exists(output_excel) and os.path.exists(output_csv):
   with open(output_excel, "rb") as f:
     excel_bytes = f.read()
@@ -108,56 +106,60 @@ if os.path.exists(output_excel) and os.path.exists(output_csv):
   )
   st.sidebar.success("✅ Toplu raporlar indirilmeye hazır.")
 else:
-  st.sidebar.info(
-      "ℹ️ Henüz toplu tarama dosyası oluşturulmamış. Giriş yaptıktan sonra"
-      " yukarıdaki butona basarak tarama yapabilirsiniz."
-  )
+  st.sidebar.info("ℹ️ Henüz toplu tarama dosyası oluşturulmamış.")
 
 st.sidebar.markdown("---")
 
-# --- ANA EKRAN: TEKLİ ARAMA VE DEĞERLENDİRME ---
-if service:
-  student_folders = list_student_folders()
+# --- ANA EKRAN: TEKLİ ARAMA (ÖNCE KAYITLI CSV'YE BAKAR, TOKEN HARCANMAZ) ---
+st.subheader("🔍 Öğrenci Puan / Rapor Sorgulama")
 
-  search_query = st.text_input(
-      "Değerlendirilecek Öğrencinin Adını Yazın (örn: İsim Soyisim):", ""
-  )
-  matched_students = {
-      name: fid
-      for name, fid in student_folders.items()
-      if search_query.lower() in name.lower()
-  }
+student_folders = list_student_folders()
+search_query = st.text_input(
+    "Değerlendirilecek Öğrencinin Adını Yazın (örn: İsim Soyisim):", ""
+)
 
-  if search_query:
-    if matched_students:
-      selected_student = st.selectbox(
-          "Eşleşen Öğrenciler:", list(matched_students.keys())
+matched_students = {
+    name: fid
+    for name, fid in student_folders.items()
+    if search_query.lower() in name.lower()
+}
+
+if search_query:
+  if matched_students:
+    selected_student = st.selectbox(
+        "Eşleşen Öğrenciler:", list(matched_students.keys())
+    )
+
+    saved_report_found = False
+    if os.path.exists(output_csv):
+      df_saved = pd.read_csv(output_csv)
+      student_row = df_saved[df_saved["Öğrenci Adı"] == selected_student]
+      if not student_row.empty:
+        saved_report_found = True
+        row_data = student_row.iloc[0]
+        st.success(f"✅ Kayıtlı Öğrenci Puanı Bulundu")
+        st.info(f"**Öğrenci Adı:** {row_data['Öğrenci Adı']}")
+        st.info(f"**Puan / Durum:** {row_data['Puan']}")
+
+    if not saved_report_found:
+      st.warning(
+          "⚠️ Bu öğrenci daha önce toplu taranmamış veya raporda bulunamadı."
       )
-      student_folder_id = matched_students[selected_student]
-
-      if st.button("Ödevi Değerlendir"):
-        with st.spinner(
-            f"{selected_student} adlı öğrencinin ödevi Google Drive'dan okunuyor"
-            " ve model inceliyor..."
-        ):
+      if service and st.button("Anlık Olarak Tekrar Değerlendir (Token Harcar)"):
+        student_folder_id = matched_students[selected_student]
+        with st.spinner(f"{selected_student} ödevi Drive'dan inceleniyor..."):
           sql_kodu, file_name = get_sql_file_from_student_folder(
               service, student_folder_id
           )
-
           if sql_kodu:
-            try:
-              st.success(f"Başarılı! Bulunan Dosya: {file_name}")
-              report = evaluate_student_sql(sql_kodu)
-              st.markdown(report)
-              with st.expander("Öğrencinin Orijinal SQL Kodunu Gör"):
-                st.code(sql_kodu, language="sql")
-            except Exception as e:
-              st.error(
-                  f"Model değerlendirmesi sırasında bir hata oluştu: {e}"
-              )
+            st.success(f"Başarılı! Bulunan Dosya: {file_name}")
+            report = evaluate_student_sql(sql_kodu)
+            st.markdown(report)
+            with st.expander("Orijinal SQL Kodunu Gör"):
+              st.code(sql_kodu, language="sql")
           else:
             st.warning(file_name)
-    else:
-      st.info("Aradığınız kritere uygun öğrenci bulunamadı.")
-else:
-  st.info("👈 Devam etmek için lütfen sağdaki 'Google ile Giriş Yap' butonuna basın.")
+      elif not service:
+        st.info("Tekli anlık tarama için lütfen Google ile giriş yapın.")
+  else:
+    st.info("Aradığınız kritere uygun öğrenci bulunamadı.")
