@@ -3,12 +3,35 @@ import os
 import re
 import pandas as pd
 import streamlit as st
-from loaders import (
+
+# 1. Drive Servisi ve SQL Modülleri
+from loaders_sql import (
     get_oauth_drive_service,
     get_sql_file_from_student_folder,
-    list_student_folders,
+    list_student_folders as list_sql_student_folders,
 )
-from raghelper import evaluate_student_sql
+from raghelper_sql import evaluate_student_sql
+
+# 2. CRM Modülleri
+from loaders_crm import (
+    get_crm_excel_from_student_folder,
+    list_crm_student_folders,
+)
+from raghelper_crm import evaluate_student_crm
+
+# 3. Power BI Modülleri
+from loaders_pbi import (
+    get_pbi_file_from_student_folder,
+    list_pbi_student_folders,
+)
+from raghelper_pbi import evaluate_student_pbi
+
+# 4. Machine Learning Modülleri
+from loaders_ml import (
+    get_ml_file_from_student_folder,
+    list_ml_student_folders,
+)
+from raghelper_ml import evaluate_student_ml
 
 # Sayfa Yapılandırması
 st.set_page_config(
@@ -16,6 +39,50 @@ st.set_page_config(
     layout="wide",
     page_icon="🎓",
 )
+
+
+# Ortak Puan Ayıklama Yardımcıları
+def temiz_puan_ayikla_sql(report_text):
+  if not report_text:
+    return "0/33"
+  match = re.search(r"TOPLAM PUAN:\s*([^\n\r]+)", report_text, re.IGNORECASE)
+  raw_puan = match.group(1).strip() if match else report_text
+  if "0/100" in raw_puan:
+    return "0/33"
+  if "100/100" in raw_puan:
+    return "33/33"
+  frac_match = re.search(r"(\d+)\s*/\s*(\d+)", raw_puan)
+  if frac_match:
+    dogru, toplam = int(frac_match.group(1)), int(frac_match.group(2))
+    return (
+        f"{dogru}/33"
+        if toplam == 33
+        else f"{min(33, max(0, round((dogru / toplam) * 33)))}/33"
+    )
+  num_match = re.search(r"\b(\d+)\b", raw_puan)
+  return f"{int(num_match.group(1))}/33" if num_match else "33/33"
+
+
+def temiz_puan_ayikla_100(report_text):
+  if not report_text:
+    return "0/100"
+  match = re.search(r"TOPLAM PUAN:\s*([^\n\r]+)", report_text, re.IGNORECASE)
+  raw_puan = match.group(1).strip() if match else report_text
+  frac_match = re.search(r"(\d+)\s*/\s*(\d+)", raw_puan)
+  if frac_match:
+    dogru, toplam = int(frac_match.group(1)), int(frac_match.group(2))
+    return (
+        f"{dogru}/100"
+        if toplam == 100
+        else f"{min(100, max(0, round((dogru / toplam) * 100)))}/100"
+    )
+  num_match = re.search(r"\b(\d+)\b", raw_puan)
+  return (
+      f"{int(num_match.group(1))}/100"
+      if (num_match and int(num_match.group(1)) <= 100)
+      else "0/100"
+  )
+
 
 # ==========================================
 # 1. EN ÜST KATMAN: PORTAL GEZİNME PANELİ
@@ -29,6 +96,28 @@ ana_alan = st.sidebar.radio(
 
 st.sidebar.markdown("---")
 
+# Global Yönetici Girişi (Her sekmede tek tek şifre girmeyi önler)
+st.sidebar.subheader("🔑 Yönetici Erişimi")
+admin_password_input = st.sidebar.text_input(
+    "Yönetici Şifresi",
+    type="password",
+    placeholder="Şifreyi giriniz...",
+    key="global_admin_pass",
+)
+correct_password = st.secrets.get("admin_password", "miuul2026")
+is_admin = admin_password_input == correct_password
+service = None
+
+if is_admin:
+  st.sidebar.success("🔓 Yönetici Yetkisi Aktif")
+  with st.sidebar:
+    service = get_oauth_drive_service()
+elif admin_password_input:
+  st.sidebar.error("❌ Hatalı şifre!")
+
+st.sidebar.markdown("---")
+
+
 # ==========================================
 # ALAN 1: MENTOR COCKPIT
 # ==========================================
@@ -38,16 +127,14 @@ if ana_alan == "📊 Mentor Cockpit":
       "Öğrenci genel ilerleme durumu, katılım takip metrikleri ve haftalık özet"
       " paneli."
   )
-
   col1, col2, col3, col4 = st.columns(4)
   col1.metric("Toplam Öğrenci", "73")
   col2.metric("Aktif Takip Edilen", "DA11")
   col3.metric("Tamamlanan Modüller", "1_CRM, 2_SQL")
   col4.metric("Devam Eden Modül", "3_PowerBI")
-
   st.info(
-      "💡 Mentor Cockpit göstergeleri ve Google Sheets / RFM takip tabloları"
-      " bu ekrana bağlanacaktır."
+      "💡 Mentor Cockpit göstergeleri ve Google Sheets takip tabloları bu alana"
+      " bağlanacaktır."
   )
 
 
@@ -58,356 +145,689 @@ elif ana_alan == "🤖 AI Değerlendirme Hub'ı":
   secilen_modul = st.sidebar.selectbox(
       "📚 Değerlendirilecek Modülü Seçin:",
       [
-          "SQL",
           "CRM Analytics (Excel)",
+          "SQL",
           "Power BI",
           "Machine Learning (Python)",
       ],
       index=0,
   )
 
-  # ----------------------------------------------------
-  # MODÜL: 2_SQL ★
-  # ----------------------------------------------------
-  if secilen_modul == "SQL":
+  # ====================================================
+  # MODÜL 1: CRM ANALYTICS (EXCEL)
+  # ====================================================
+  if secilen_modul == "CRM Analytics (Excel)":
+    st.title("📑 CRM Analytics & Müşteri Segmentasyonu")
+    st.caption(
+        "Excel (.xlsx) üzerinden RFM skorları, segment eşleştirmeleri ve"
+        " aksiyon kararlarının analizi."
+    )
+
+    CRM_ROOT_ID = st.secrets.get(
+        "crm_folder_id", "12pr9WZ8jgtTNGBToh0LFbmwVL61XK_XM"
+    )
+    CACHE_CRM = "rapor_cache_crm.json"
+    OUT_CSV_CRM = "tum_ogrenci_crm_puanlari.csv"
+    OUT_XLSX_CRM = "tum_ogrenci_crm_puanlari.xlsx"
+
+    if is_admin and service:
+      if st.sidebar.button(
+          "🚀 CRM Ödevlerini Tara ve Puanla", key="btn_scan_crm"
+      ):
+        folders = list_crm_student_folders(service, CRM_ROOT_ID)
+        cache_data = {}
+        if os.path.exists(CACHE_CRM):
+          try:
+            with open(CACHE_CRM, "r", encoding="utf-8") as f:
+              cache_data = json.load(f)
+          except Exception:
+            pass
+
+        results = []
+        pbar = st.sidebar.progress(0)
+        st_text = st.sidebar.empty()
+        total = len(folders)
+        atlanansayisi, taranansayisi = 0, 0
+
+        for idx, (s_name, f_id) in enumerate(folders.items(), start=1):
+          mevcut_puan = cache_data.get(s_name, {}).get("puan", "")
+          if (
+              re.match(r"^\d+/100$", str(mevcut_puan))
+              and mevcut_puan != "0/100"
+          ):
+            atlanansayisi += 1
+            results.append({"Öğrenci Adı": s_name, "Puan": mevcut_puan})
+            pbar.progress(idx / total)
+            continue
+
+          taranansayisi += 1
+          st_text.text(f"[{idx}/{total}] {s_name} inceleniyor...")
+          ozet, msg, drive_link = get_crm_excel_from_student_folder(
+              service, f_id
+          )
+
+          if ozet:
+            try:
+              report = evaluate_student_crm(ozet)
+              puan = temiz_puan_ayikla_100(report)
+            except Exception as e:
+              report, puan = f"Hata: {str(e)}", "0/100"
+          else:
+            report, puan = f"Dosya durumu: {msg}", "Ödev Yok"
+
+          cache_data[s_name] = {
+              "puan": puan,
+              "dosya_adi": msg,
+              "detayli_rapor": report,
+              "excel_ozet": ozet if ozet else "",
+              "drive_link": drive_link,
+          }
+          results.append({"Öğrenci Adı": s_name, "Puan": puan})
+          pbar.progress(idx / total)
+
+        with open(CACHE_CRM, "w", encoding="utf-8") as f:
+          json.dump(cache_data, f, ensure_ascii=False, indent=4)
+        df_res = pd.DataFrame(results)
+        df_res.to_csv(OUT_CSV_CRM, index=False, encoding="utf-8-sig")
+        df_res.to_excel(OUT_XLSX_CRM, index=False)
+        st_text.empty()
+        pbar.empty()
+        st.sidebar.success(
+            f"🎉 Tamamlandı ({atlanansayisi} korundu, {taranansayisi} tarandı)!"
+        )
+        st.rerun()
+
+    # CRM İndirme Butonları
+    st.sidebar.subheader("📥 CRM Çıktıları")
+    if os.path.exists(OUT_XLSX_CRM):
+      with open(OUT_XLSX_CRM, "rb") as f:
+        st.sidebar.download_button(
+            "📊 CRM Notları (.xlsx)",
+            f.read(),
+            OUT_XLSX_CRM,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="dl_crm_xl",
+        )
+    if os.path.exists(OUT_CSV_CRM):
+      with open(OUT_CSV_CRM, "rb") as f:
+        st.sidebar.download_button(
+            "📄 CRM Notları (.csv)",
+            f.read(),
+            OUT_CSV_CRM,
+            "text/csv",
+            key="dl_crm_csv",
+        )
+    if os.path.exists(CACHE_CRM):
+      with open(CACHE_CRM, "rb") as f:
+        st.sidebar.download_button(
+            "📦 CRM Cache (.json)",
+            f.read(),
+            CACHE_CRM,
+            "application/json",
+            key="dl_crm_json",
+        )
+
+    # CRM Sorgulama ve Ödev İnceleme
+    st.subheader("🔍 Öğrenci Detaylı CRM Raporu Sorgula")
+    cache_crm_data = {}
+    if os.path.exists(CACHE_CRM):
+      try:
+        with open(CACHE_CRM, "r", encoding="utf-8") as f:
+          cache_crm_data = json.load(f)
+      except Exception:
+        pass
+
+    q_crm = st.text_input(
+        "Öğrencinin Adını Yazın:", "", key="search_crm_student"
+    )
+    matched_crm = [s for s in cache_crm_data.keys() if q_crm.lower() in s.lower()]
+
+    if q_crm and matched_crm:
+      sel_crm = st.selectbox(
+          "Eşleşen Öğrenciler:", matched_crm, key="select_crm_student"
+      )
+      s_info = cache_crm_data.get(sel_crm, {})
+      puan = s_info.get("puan", "-")
+
+      st.success(f"✅ Rapor Hazır (Dosya: {s_info.get('dosya_adi', '-')})")
+      col_a, col_b = st.columns(2)
+      col_a.info(f"**Öğrenci:** {sel_crm}")
+      col_b.info(f"**Puan:** {puan}")
+
+      st.markdown("### 📝 Detaylı Değerlendirme Raporu")
+      st.markdown(s_info.get("detayli_rapor", "Rapor bulunamadı."))
+
+      st.markdown("---")
+      col_btn, _ = st.columns([2, 3])
+      if s_info.get("drive_link"):
+        with col_btn:
+          st.link_button(
+              "📂 Orijinal Excel Dosyasını Drive'da Aç",
+              s_info.get("drive_link"),
+          )
+
+      if s_info.get("excel_ozet"):
+        with st.expander(
+            "📑 Öğrencinin Teslim Ettiği Excel Tablolarını ve Metriklerini Gör",
+            expanded=True,
+        ):
+          st.text(s_info.get("excel_ozet"))
+    elif q_crm:
+      st.info("Eşleşen öğrenci bulunamadı.")
+
+  # ====================================================
+  # MODÜL 2: SQL
+  # ====================================================
+  elif secilen_modul == "SQL":
     st.title("⚡ SQL Ödev Değerlendirme (33 Soru)")
     st.caption(
         "Northwind & CRM veri tabanı üzerinden hazırlanan 33 soruluk SQL"
-        " bitirme projelerinin AI destekli analizi."
+        " projelerinin analizi."
     )
 
-    output_excel = "tum_ogrenci_sql_puanlari.xlsx"
-    output_csv = "tum_ogrenci_sql_puanlari.csv"
-    CACHE_JSON = "rapor_cache.json"
+    CACHE_SQL = "rapor_cache.json"
+    OUT_CSV_SQL = "tum_ogrenci_sql_puanlari.csv"
+    OUT_XLSX_SQL = "tum_ogrenci_sql_puanlari.xlsx"
 
-    def temiz_puan_ayikla(report_text):
-      if not report_text:
-        return "0/33"
-      match = re.search(
-          r"TOPLAM PUAN:\s*([^\n\r]+)", report_text, re.IGNORECASE
-      )
-      raw_puan = match.group(1).strip() if match else report_text
+    if is_admin and service:
+      if st.sidebar.button(
+          "🚀 SQL Eksikleri Tara ve Puanla", key="btn_scan_sql"
+      ):
+        folders = list_sql_student_folders()
+        cache_data = {}
+        if os.path.exists(CACHE_SQL):
+          try:
+            with open(CACHE_SQL, "r", encoding="utf-8") as f:
+              cache_data = json.load(f)
+          except Exception:
+            pass
 
-      if "0/100" in raw_puan:
-        return "0/33"
-      if "100/100" in raw_puan:
-        return "33/33"
+        results = []
+        pbar = st.sidebar.progress(0)
+        st_text = st.sidebar.empty()
+        total = len(folders)
+        atlanansayisi, taranansayisi = 0, 0
 
-      frac_match = re.search(r"(\d+)\s*/\s*(\d+)", raw_puan)
-      if frac_match:
-        dogru = int(frac_match.group(1))
-        toplam = int(frac_match.group(2))
-        if toplam == 33:
-          return f"{dogru}/33"
-        elif toplam > 0:
-          hesaplanan = round((dogru / toplam) * 33)
-          return f"{min(33, max(0, hesaplanan))}/33"
+        for idx, (s_name, f_id) in enumerate(folders.items(), start=1):
+          mevcut_puan = cache_data.get(s_name, {}).get("puan", "")
+          if (
+              re.match(r"^\d+/33$", str(mevcut_puan))
+              and mevcut_puan != "0/33"
+          ):
+            atlanansayisi += 1
+            results.append({"Öğrenci Adı": s_name, "Puan": mevcut_puan})
+            pbar.progress(idx / total)
+            continue
 
-      num_match = re.search(r"\b(\d+)\b", raw_puan)
-      if num_match:
-        val = int(num_match.group(1))
-        if val <= 33:
-          return f"{val}/33"
+          taranansayisi += 1
+          st_text.text(f"[{idx}/{total}] {s_name} taranıyor...")
+          sql_kodu, msg = get_sql_file_from_student_folder(service, f_id)
 
-      return "33/33"
-
-    # Sol Menü: Yönetici & Toplu Rapor
-    st.sidebar.subheader("📊 SQL Toplu Rapor Yönetimi")
-    admin_password_input = st.sidebar.text_input(
-        "🔑 Yönetici Şifresi",
-        type="password",
-        placeholder="Şifreyi giriniz...",
-        key="sql_admin_pass",
-    )
-    correct_password = st.secrets.get("admin_password", "miuul2026")
-    service = None
-
-    if admin_password_input == correct_password:
-      st.sidebar.success("🔓 Yönetici Girişi Yapıldı")
-      with st.sidebar:
-        service = get_oauth_drive_service()
-
-      if service:
-        # BUTON 1: TOPLU TARAMA
-        if st.sidebar.button(
-            "🚀 Eksikleri Tara ve Güncelle (0 Puan ve Boşlar Taranır)"
-        ):
-          student_folders = list_student_folders()
-          cache_data = {}
-          if os.path.exists(CACHE_JSON):
+          if sql_kodu:
             try:
-              with open(CACHE_JSON, "r", encoding="utf-8") as f:
+              report = evaluate_student_sql(sql_kodu)
+              puan = temiz_puan_ayikla_sql(report)
+            except Exception as e:
+              report, puan = f"Hata: {str(e)}", "0/33"
+          else:
+            report, puan = f"Dosya durumu: {msg}", "Ödev Yok"
+
+          cache_data[s_name] = {
+              "puan": puan,
+              "dosya_adi": msg,
+              "detayli_rapor": report,
+              "sql_kodu": sql_kodu if sql_kodu else "",
+          }
+          results.append({"Öğrenci Adı": s_name, "Puan": puan})
+          pbar.progress(idx / total)
+
+        with open(CACHE_SQL, "w", encoding="utf-8") as f:
+          json.dump(cache_data, f, ensure_ascii=False, indent=4)
+        df_res = pd.DataFrame(results)
+        df_res.to_csv(OUT_CSV_SQL, index=False, encoding="utf-8-sig")
+        df_res.to_excel(OUT_XLSX_SQL, index=False)
+        st_text.empty()
+        pbar.empty()
+        st.sidebar.success(
+            f"🎉 Tamamlandı ({atlanansayisi} korundu, {taranansayisi} tarandı)!"
+        )
+        st.rerun()
+
+      if st.sidebar.button(
+          "📥 Eksik SQL Kodlarını Çek (0 Token)", key="btn_fetch_sql_code"
+      ):
+        folders = list_sql_student_folders()
+        cache_data = {}
+        if os.path.exists(CACHE_SQL):
+          try:
+            with open(CACHE_SQL, "r", encoding="utf-8") as f:
+              cache_data = json.load(f)
+          except Exception:
+            pass
+
+        pbar = st.sidebar.progress(0)
+        st_text = st.sidebar.empty()
+        total = len(folders)
+        guncellenen = 0
+
+        for idx, (s_name, f_id) in enumerate(folders.items(), start=1):
+          if s_name in cache_data and not cache_data[s_name].get("sql_kodu"):
+            st_text.text(f"[{idx}/{total}] {s_name} SQL kodu alınıyor...")
+            sql_kodu, _ = get_sql_file_from_student_folder(service, f_id)
+            if sql_kodu:
+              cache_data[s_name]["sql_kodu"] = sql_kodu
+              guncellenen += 1
+          pbar.progress(idx / total)
+
+        with open(CACHE_SQL, "w", encoding="utf-8") as f:
+          json.dump(cache_data, f, ensure_ascii=False, indent=4)
+        st_text.empty()
+        pbar.empty()
+        st.sidebar.success(f"✅ {guncellenen} öğrencinin SQL kodu kaydedildi!")
+        st.rerun()
+
+    # SQL İndirme Butonları
+    st.sidebar.subheader("📥 SQL Çıktıları")
+    if os.path.exists(OUT_XLSX_SQL):
+      with open(OUT_XLSX_SQL, "rb") as f:
+        st.sidebar.download_button(
+            "📊 SQL Notları (.xlsx)",
+            f.read(),
+            OUT_XLSX_SQL,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="dl_sql_xl",
+        )
+    if os.path.exists(OUT_CSV_SQL):
+      with open(OUT_CSV_SQL, "rb") as f:
+        st.sidebar.download_button(
+            "📄 SQL Notları (.csv)",
+            f.read(),
+            OUT_CSV_SQL,
+            "text/csv",
+            key="dl_sql_csv",
+        )
+    if os.path.exists(CACHE_SQL):
+      with open(CACHE_SQL, "rb") as f:
+        st.sidebar.download_button(
+            "📦 SQL Cache (.json)",
+            f.read(),
+            CACHE_SQL,
+            "application/json",
+            key="dl_sql_json",
+        )
+
+    # SQL Sorgulama ve Kod İnceleme
+    st.subheader("🔍 Öğrenci Detaylı SQL Raporu Sorgula")
+    student_folders = list_sql_student_folders()
+    q_sql = st.text_input(
+        "Öğrencinin Adını Yazın:", "", key="search_sql_student"
+    )
+    matched_sql = {
+        n: fid for n, fid in student_folders.items() if q_sql.lower() in n.lower()
+    }
+
+    if q_sql and matched_sql:
+      sel_sql = st.selectbox(
+          "Eşleşen Öğrenciler:",
+          list(matched_sql.keys()),
+          key="select_sql_student",
+      )
+      cache_sql_data = {}
+      if os.path.exists(CACHE_SQL):
+        try:
+          with open(CACHE_SQL, "r", encoding="utf-8") as f:
+            cache_sql_data = json.load(f)
+        except Exception:
+          pass
+
+      s_info = cache_sql_data.get(sel_sql)
+      if s_info:
+        puan = s_info.get("puan", "-")
+        st.success(f"✅ Rapor Hazır (Dosya: {s_info.get('dosya_adi', '-')})")
+        col_a, col_b = st.columns(2)
+        col_a.info(f"**Öğrenci:** {sel_sql}")
+        col_b.info(f"**Puan:** {puan}")
+
+        st.markdown("### 📝 Detaylı Değerlendirme Raporu")
+        st.markdown(s_info.get("detayli_rapor", "Rapor metni bulunamadı."))
+
+        st.markdown("---")
+        sql_kodu = s_info.get("sql_kodu")
+        if sql_kodu:
+          with st.expander(
+              "📄 Öğrencinin Yüklediği Orijinal SQL Kodunu Gör", expanded=True
+          ):
+            st.code(sql_kodu, language="sql")
+        else:
+          st.warning(
+              "ℹ️ SQL kodu henüz önbelleğe alınmamış. Sol menüden 'Eksik SQL"
+              " Kodlarını Çek' butonuna basabilirsiniz."
+          )
+      else:
+        st.warning("⚠️ Bu öğrenci henüz taranmamış.")
+    elif q_sql:
+      st.info("Eşleşen öğrenci bulunamadı.")
+
+  # ====================================================
+  # MODÜL 3: POWER BI
+  # ====================================================
+  elif secilen_modul == "Power BI":
+    st.title("📊 Power BI Proje Değerlendirme")
+    st.caption(
+        "Power BI veri modeli (Star Schema), DAX ölçüleri ve görsel tasarım"
+        " analizi."
+    )
+
+    PBI_ROOT_ID = st.secrets.get(
+        "pbi_folder_id", "1OHCPzOaxie7w-vb3cgredLq_mH5Cxfiw"
+    )
+    CACHE_PBI = "rapor_cache_pbi.json"
+    OUT_CSV_PBI = "tum_ogrenci_pbi_puanlari.csv"
+    OUT_XLSX_PBI = "tum_ogrenci_pbi_puanlari.xlsx"
+
+    if is_admin and service:
+      if st.sidebar.button(
+          "🚀 Power BI Projelerini Tara ve Puanla", key="btn_scan_pbi"
+      ):
+        folders = list_pbi_student_folders(service, PBI_ROOT_ID)
+        cache_data = {}
+        if os.path.exists(CACHE_PBI):
+          try:
+            with open(CACHE_PBI, "r", encoding="utf-8") as f:
+              cache_data = json.load(f)
+          except Exception:
+            pass
+
+        results = []
+        pbar = st.sidebar.progress(0)
+        st_text = st.sidebar.empty()
+        total = len(folders)
+        atlanansayisi, taranansayisi = 0, 0
+
+        for idx, (s_name, f_id) in enumerate(folders.items(), start=1):
+          mevcut_puan = cache_data.get(s_name, {}).get("puan", "")
+          if (
+              re.match(r"^\d+/100$", str(mevcut_puan))
+              and mevcut_puan != "0/100"
+          ):
+            atlanansayisi += 1
+            results.append({"Öğrenci Adı": s_name, "Puan": mevcut_puan})
+            pbar.progress(idx / total)
+            continue
+
+          taranansayisi += 1
+          st_text.text(f"[{idx}/{total}] {s_name} inceleniyor...")
+          ozet, msg, drive_link = get_pbi_file_from_student_folder(
+              service, f_id
+          )
+
+          if ozet:
+            try:
+              report = evaluate_student_pbi(ozet)
+              puan = temiz_puan_ayikla_100(report)
+            except Exception as e:
+              report, puan = f"Hata: {str(e)}", "0/100"
+          else:
+            report, puan = f"Dosya durumu: {msg}", "Ödev Yok"
+
+          cache_data[s_name] = {
+              "puan": puan,
+              "dosya_adi": msg,
+              "detayli_rapor": report,
+              "pbi_summary": ozet if ozet else "",
+              "drive_link": drive_link,
+          }
+          results.append({"Öğrenci Adı": s_name, "Puan": puan})
+          pbar.progress(idx / total)
+
+        with open(CACHE_PBI, "w", encoding="utf-8") as f:
+          json.dump(cache_data, f, ensure_ascii=False, indent=4)
+        df_res = pd.DataFrame(results)
+        df_res.to_csv(OUT_CSV_PBI, index=False, encoding="utf-8-sig")
+        df_res.to_excel(OUT_XLSX_PBI, index=False)
+        st_text.empty()
+        pbar.empty()
+        st.sidebar.success(
+            f"🎉 Tamamlandı ({atlanansayisi} korundu, {taranansayisi} tarandı)!"
+        )
+        st.rerun()
+
+    # Power BI İndirme Butonları
+    st.sidebar.subheader("📥 Power BI Çıktıları")
+    if os.path.exists(OUT_XLSX_PBI):
+      with open(OUT_XLSX_PBI, "rb") as f:
+        st.sidebar.download_button(
+            "📊 Power BI Notları (.xlsx)",
+            f.read(),
+            OUT_XLSX_PBI,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="dl_pbi_xl",
+        )
+    if os.path.exists(OUT_CSV_PBI):
+      with open(OUT_CSV_PBI, "rb") as f:
+        st.sidebar.download_button(
+            "📄 Power BI Notları (.csv)",
+            f.read(),
+            OUT_CSV_PBI,
+            "text/csv",
+            key="dl_pbi_csv",
+        )
+    if os.path.exists(CACHE_PBI):
+      with open(CACHE_PBI, "rb") as f:
+        st.sidebar.download_button(
+            "📦 Power BI Cache (.json)",
+            f.read(),
+            CACHE_PBI,
+            "application/json",
+            key="dl_pbi_json",
+        )
+
+    # Power BI Sorgulama ve Proje İnceleme
+    st.subheader("🔍 Öğrenci Detaylı Power BI Raporu Sorgula")
+    cache_pbi_data = {}
+    if os.path.exists(CACHE_PBI):
+      try:
+        with open(CACHE_PBI, "r", encoding="utf-8") as f:
+          cache_pbi_data = json.load(f)
+      except Exception:
+        pass
+
+    q_pbi = st.text_input(
+        "Öğrencinin Adını Yazın:", "", key="search_pbi_student"
+    )
+    matched_pbi = [s for s in cache_pbi_data.keys() if q_pbi.lower() in s.lower()]
+
+    if q_pbi and matched_pbi:
+      sel_pbi = st.selectbox(
+          "Eşleşen Öğrenciler:", matched_pbi, key="select_pbi_student"
+      )
+      s_info = cache_pbi_data.get(sel_pbi, {})
+      puan = s_info.get("puan", "-")
+
+      st.success(f"✅ Rapor Hazır (Dosya: {s_info.get('dosya_adi', '-')})")
+      col_a, col_b = st.columns(2)
+      col_a.info(f"**Öğrenci:** {sel_pbi}")
+      col_b.info(f"**Puan:** {puan}")
+
+      st.markdown("### 📝 Detaylı Değerlendirme Raporu")
+      st.markdown(s_info.get("detayli_rapor", "Rapor metni bulunamadı."))
+
+      st.markdown("---")
+      col_btn, _ = st.columns([2, 3])
+      if s_info.get("drive_link"):
+        with col_btn:
+          st.link_button(
+              "📂 Orijinal Power BI Dosyasını Drive'da Aç",
+              s_info.get("drive_link"),
+          )
+
+      if s_info.get("pbi_summary"):
+        with st.expander(
+            "📊 Öğrencinin Veri Modeli ve Dashboard Yapısını Gör", expanded=True
+        ):
+          st.code(s_info.get("pbi_summary"), language="yaml")
+    elif q_pbi:
+      st.info("Eşleşen öğrenci bulunamadı.")
+
+  # ====================================================
+  # MODÜL 4: MACHINE LEARNING (PYTHON)
+  # ====================================================
+  elif secilen_modul == "Machine Learning (Python)":
+    st.title("🧠 Machine Learning Pipeline Değerlendirme")
+    st.caption(
+        "Python (.py) ve Jupyter Notebook (.ipynb) üzerinden EDA, Feature"
+        " Engineering ve model pipeline analizi."
+    )
+
+    ML_ROOT_ID = st.secrets.get("ml_folder_id", "")
+    CACHE_ML = "rapor_cache_ml.json"
+    OUT_CSV_ML = "tum_ogrenci_ml_puanlari.csv"
+    OUT_XLSX_ML = "tum_ogrenci_ml_puanlari.xlsx"
+
+    if is_admin and service:
+      if st.sidebar.button(
+          "🚀 ML Projelerini Tara ve Puanla", key="btn_scan_ml"
+      ):
+        if not ML_ROOT_ID:
+          st.sidebar.error(
+              "❌ secrets.toml dosyasında 'ml_folder_id' tanımlanmamış!"
+          )
+        else:
+          folders = list_ml_student_folders(service, ML_ROOT_ID)
+          cache_data = {}
+          if os.path.exists(CACHE_ML):
+            try:
+              with open(CACHE_ML, "r", encoding="utf-8") as f:
                 cache_data = json.load(f)
             except Exception:
               pass
 
           results = []
-          progress_bar = st.sidebar.progress(0)
-          status_text = st.sidebar.empty()
-          total_students = len(student_folders)
+          pbar = st.sidebar.progress(0)
+          st_text = st.sidebar.empty()
+          total = len(folders)
+          atlanansayisi, taranansayisi = 0, 0
 
-          atlanansayisi = 0
-          taranansayisi = 0
-
-          for idx, (student_name, folder_id) in enumerate(
-              student_folders.items(), start=1
-          ):
-            mevcut_puan = cache_data.get(student_name, {}).get("puan", "")
-
-            # 0/33 VE 'Ödev Yok' OLANLARI ATLAMAZ, TEKRAR OKUR
+          for idx, (s_name, f_id) in enumerate(folders.items(), start=1):
+            mevcut_puan = cache_data.get(s_name, {}).get("puan", "")
             if (
-                re.match(r"^\d+/33$", str(mevcut_puan))
-                and mevcut_puan != "0/33"
+                re.match(r"^\d+/100$", str(mevcut_puan))
+                and mevcut_puan != "0/100"
             ):
               atlanansayisi += 1
-              results.append(
-                  {"Öğrenci Adı": student_name, "Puan": mevcut_puan}
-              )
-              progress_bar.progress(idx / total_students)
+              results.append({"Öğrenci Adı": s_name, "Puan": mevcut_puan})
+              pbar.progress(idx / total)
               continue
 
             taranansayisi += 1
-            status_text.text(
-                f"[{idx}/{total_students}] {student_name} taranıyor..."
+            st_text.text(f"[{idx}/{total}] {s_name} inceleniyor...")
+            kod, msg, drive_link = get_ml_file_from_student_folder(
+                service, f_id
             )
-            sql_kodu, msg = get_sql_file_from_student_folder(service, folder_id)
 
-            if sql_kodu:
+            if kod:
               try:
-                report = evaluate_student_sql(sql_kodu)
-                puan = temiz_puan_ayikla(report)
-              except Exception as api_err:
-                report = f"Hata: {str(api_err)}"
-                puan = "0/33"
+                report = evaluate_student_ml(kod)
+                puan = temiz_puan_ayikla_100(report)
+              except Exception as e:
+                report, puan = f"Hata: {str(e)}", "0/100"
             else:
-              report = f"Dosya durumu: {msg}"
-              puan = "Ödev Yok"
+              report, puan = f"Dosya durumu: {msg}", "Ödev Yok"
 
-            cache_data[student_name] = {
+            cache_data[s_name] = {
                 "puan": puan,
                 "dosya_adi": msg,
                 "detayli_rapor": report,
-                "sql_kodu": sql_kodu if sql_kodu else "",
+                "code_content": kod if kod else "",
+                "drive_link": drive_link,
             }
+            results.append({"Öğrenci Adı": s_name, "Puan": puan})
+            pbar.progress(idx / total)
 
-            results.append({"Öğrenci Adı": student_name, "Puan": puan})
-            progress_bar.progress(idx / total_students)
-
-          with open(CACHE_JSON, "w", encoding="utf-8") as f:
+          with open(CACHE_ML, "w", encoding="utf-8") as f:
             json.dump(cache_data, f, ensure_ascii=False, indent=4)
-
-          df_results = pd.DataFrame(results)
-          df_results.to_csv(output_csv, index=False, encoding="utf-8-sig")
-          df_results.to_excel(output_excel, index=False)
-
-          status_text.empty()
-          progress_bar.empty()
+          df_res = pd.DataFrame(results)
+          df_res.to_csv(OUT_CSV_ML, index=False, encoding="utf-8-sig")
+          df_res.to_excel(OUT_XLSX_ML, index=False)
+          st_text.empty()
+          pbar.empty()
           st.sidebar.success(
-              f"🎉 Bitti! ({atlanansayisi} hafızadan korundu, {taranansayisi}"
-              " yeniden tarandı)"
+              f"🎉 Tamamlandı ({atlanansayisi} korundu, {taranansayisi}"
+              " tarandı)!"
           )
           st.rerun()
 
-        # BUTON 2: SIFIR TOKEN İLE SQL KODLARINI HAFIZAYA ÇEKME
-        if st.sidebar.button(
-            "📥 Eksik SQL Kodlarını Drive'dan Çek (0 Token - Bedava)"
+    # Machine Learning İndirme Butonları
+    st.sidebar.subheader("📥 ML Çıktıları")
+    if os.path.exists(OUT_XLSX_ML):
+      with open(OUT_XLSX_ML, "rb") as f:
+        st.sidebar.download_button(
+            "📊 ML Notları (.xlsx)",
+            f.read(),
+            OUT_XLSX_ML,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="dl_ml_xl",
+        )
+    if os.path.exists(OUT_CSV_ML):
+      with open(OUT_CSV_ML, "rb") as f:
+        st.sidebar.download_button(
+            "📄 ML Notları (.csv)",
+            f.read(),
+            OUT_CSV_ML,
+            "text/csv",
+            key="dl_ml_csv",
+        )
+    if os.path.exists(CACHE_ML):
+      with open(CACHE_ML, "rb") as f:
+        st.sidebar.download_button(
+            "📦 ML Cache (.json)",
+            f.read(),
+            CACHE_ML,
+            "application/json",
+            key="dl_ml_json",
+        )
+
+    # Machine Learning Sorgulama ve Kod İnceleme
+    st.subheader("🔍 Öğrenci Detaylı ML Raporu Sorgula")
+    cache_ml_data = {}
+    if os.path.exists(CACHE_ML):
+      try:
+        with open(CACHE_ML, "r", encoding="utf-8") as f:
+          cache_ml_data = json.load(f)
+      except Exception:
+        pass
+
+    q_ml = st.text_input("Öğrencinin Adını Yazın:", "", key="search_ml_student")
+    matched_ml = [s for s in cache_ml_data.keys() if q_ml.lower() in s.lower()]
+
+    if q_ml and matched_ml:
+      sel_ml = st.selectbox(
+          "Eşleşen Öğrenciler:", matched_ml, key="select_ml_student"
+      )
+      s_info = cache_ml_data.get(sel_ml, {})
+      puan = s_info.get("puan", "-")
+
+      st.success(f"✅ Rapor Hazır (Dosya: {s_info.get('dosya_adi', '-')})")
+      col_a, col_b = st.columns(2)
+      col_a.info(f"**Öğrenci:** {sel_ml}")
+      col_b.info(f"**Puan:** {puan}")
+
+      st.markdown("### 📝 Detaylı Değerlendirme Raporu")
+      st.markdown(s_info.get("detayli_rapor", "Rapor metni bulunamadı."))
+
+      st.markdown("---")
+      col_btn, _ = st.columns([2, 3])
+      if s_info.get("drive_link"):
+        with col_btn:
+          st.link_button(
+              "📂 Orijinal Notebook / Python Dosyasını Drive'da Aç",
+              s_info.get("drive_link"),
+          )
+
+      if s_info.get("code_content"):
+        with st.expander(
+            "🐍 Öğrencinin Python Pipeline / Notebook Kodunu Gör", expanded=True
         ):
-          student_folders = list_student_folders()
-          cache_data = {}
-          if os.path.exists(CACHE_JSON):
-            try:
-              with open(CACHE_JSON, "r", encoding="utf-8") as f:
-                cache_data = json.load(f)
-            except Exception:
-              pass
-
-          progress_bar = st.sidebar.progress(0)
-          status_text = st.sidebar.empty()
-          total_students = len(student_folders)
-          guncellenen = 0
-
-          for idx, (student_name, folder_id) in enumerate(
-              student_folders.items(), start=1
-          ):
-            if student_name in cache_data and not cache_data[student_name].get(
-                "sql_kodu"
-            ):
-              status_text.text(
-                  f"[{idx}/{total_students}] {student_name} SQL kodu"
-                  " alınıyor..."
-              )
-              sql_kodu, _ = get_sql_file_from_student_folder(service, folder_id)
-              if sql_kodu:
-                cache_data[student_name]["sql_kodu"] = sql_kodu
-                guncellenen += 1
-            progress_bar.progress(idx / total_students)
-
-          with open(CACHE_JSON, "w", encoding="utf-8") as f:
-            json.dump(cache_data, f, ensure_ascii=False, indent=4)
-
-          status_text.empty()
-          progress_bar.empty()
-          st.sidebar.success(
-              f"✅ {guncellenen} öğrencinin SQL kodu hafızaya kaydedildi!"
-          )
-          st.rerun()
-
-    elif admin_password_input and admin_password_input != correct_password:
-      st.sidebar.error("❌ Hatalı şifre!")
-    else:
-      st.sidebar.info("🔒 SQL toplu tarama için yönetici şifresini girin.")
-
-    st.sidebar.markdown("---")
-
-    # İNDİRME BUTONLARI: EXCEL, CSV VE BULUTTAN JSON ÇEKME
-    st.sidebar.subheader("📥 Rapor ve Veri Çıktıları")
-
-    if os.path.exists(output_excel):
-      with open(output_excel, "rb") as f:
-        st.sidebar.download_button(
-            label="📊 SQL Sınıf Notları (.xlsx)",
-            data=f.read(),
-            file_name="tum_ogrenci_sql_puanlari.xlsx",
-            mime=(
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            ),
-        )
-
-    if os.path.exists(output_csv):
-      with open(output_csv, "rb") as f:
-        st.sidebar.download_button(
-            label="📄 SQL Sınıf Notları (.csv)",
-            data=f.read(),
-            file_name="tum_ogrenci_sql_puanlari.csv",
-            mime="text/csv",
-        )
-
-    # CANLIDAN BİLGİSAYARINA TEK TIKLA ÇEKEBİLECEĞİN JSON BUTONU
-    if os.path.exists(CACHE_JSON):
-      with open(CACHE_JSON, "rb") as f:
-        st.sidebar.download_button(
-            label="📦 Cache Dosyasını İndir (.json)",
-            data=f.read(),
-            file_name="rapor_cache.json",
-            mime="application/json",
-        )
-
-    # SQL Arama ve Gösterim Ekranı
-    st.subheader("🔍 Öğrenci Detaylı SQL Raporu Sorgula")
-    student_folders = list_student_folders()
-    search_query = st.text_input(
-        "Öğrencinin Adını Yazın (örn: İsim Soyisim):", "", key="sql_search"
-    )
-
-    matched_students = {
-        name: fid
-        for name, fid in student_folders.items()
-        if search_query.lower() in name.lower()
-    }
-
-    if search_query:
-      if matched_students:
-        selected_student = st.selectbox(
-            "Eşleşen Öğrenciler:",
-            list(matched_students.keys()),
-            key="sql_select",
-        )
-
-        cache_data = {}
-        if os.path.exists(CACHE_JSON):
-          try:
-            with open(CACHE_JSON, "r", encoding="utf-8") as f:
-              cache_data = json.load(f)
-          except Exception:
-            pass
-
-        student_info = cache_data.get(selected_student)
-
-        if student_info:
-          puan = student_info.get("puan", "-")
-          st.success(
-              f"✅ Rapor Yüklendi (Dosya: {student_info.get('dosya_adi', '-')})"
-          )
-          col_a, col_b = st.columns(2)
-          col_a.info(f"**Öğrenci:** {selected_student}")
-          col_b.info(f"**Puan:** {puan}")
-
-          st.markdown("---")
-          st.markdown("### 📝 Detaylı Değerlendirme Raporu")
-          ham_rapor = student_info.get(
-              "detayli_rapor", "Rapor metni bulunamadı."
-          )
-          duzeltilmis_rapor = re.sub(
-              r"(TOPLAM PUAN:\s*)([^\n\r]+)",
-              rf"\g<1>{puan}",
-              ham_rapor,
-              count=1,
-              flags=re.IGNORECASE,
-          )
-          st.markdown(duzeltilmis_rapor)
-
-          ogrenci_sql = student_info.get("sql_kodu")
-
-          # Eğer hafızada yoksa ve anlık olarak şifre girildiyse Drive'dan tamamla
-          if not ogrenci_sql and service:
-            fid = matched_students.get(selected_student)
-            if fid:
-              cekilen_sql, _ = get_sql_file_from_student_folder(service, fid)
-              if cekilen_sql:
-                ogrenci_sql = cekilen_sql
-                student_info["sql_kodu"] = ogrenci_sql
-                with open(CACHE_JSON, "w", encoding="utf-8") as f:
-                  json.dump(cache_data, f, ensure_ascii=False, indent=4)
-
-          st.markdown("---")
-          if ogrenci_sql:
-            with st.expander(
-                "📄 Öğrencinin Yüklediği Orijinal SQL Kodunu Gör", expanded=True
-            ):
-              st.code(ogrenci_sql, language="sql")
-          else:
-            st.warning(
-                "ℹ️ Bu öğrencinin SQL kodu henüz önbelleğe alınmamış. Sol"
-                " menüden 'Eksik SQL Kodlarını Drive'dan Çek' butonuna"
-                " basabilirsiniz."
-            )
-        else:
-          st.warning("⚠️ Bu öğrenci henüz taranmamış.")
-      else:
-        st.info("Aradığınız kritere uygun öğrenci bulunamadı.")
-
-  # ----------------------------------------------------
-  # MODÜL: 1_CRM_Analytics (Excel / RFM)
-  # ----------------------------------------------------
-  elif secilen_modul == "CRM Analytics (Excel)":
-    st.title("📑 CRM Analytics & Müşteri Segmentasyonu")
-    st.caption(
-        "Öğrencilerin teslim ettiği Excel (.xlsx) dosyalarından RFM metrikleri"
-        " ve müşteri segmentasyon analizi."
-    )
-    st.info(
-        "🚧 Bu modülün Excel okuyucusu ve değerlendirme motoru sıradaki adımda"
-        " eklenecektir."
-    )
-
-  # ----------------------------------------------------
-  # MODÜL: 3_PowerBI
-  # ----------------------------------------------------
-  elif secilen_modul == "Power BI":
-    st.title("📊 Power BI Proje Değerlendirme")
-    st.caption(
-        "Power BI veri modeli (Star Schema), DAX hesaplamaları ve görsel pano"
-        " hiyerarşisi incelemesi."
-    )
-    st.info("🚧 Bu modülün değerlendirme kuralları hazırlanmaktadır.")
-
-  # ----------------------------------------------------
-  # MODÜL: 4_MachineLearning (Python)
-  # ----------------------------------------------------
-  elif secilen_modul == "Machine Learning (Python)":
-    st.title("🧠 Machine Learning Pipeline Değerlendirme")
-    st.caption(
-        "Python scriptleri (.py) ve Jupyter Notebook (.ipynb) üzerinden model"
-        " pipeline analizi."
-    )
-    st.info("🚧 Bu modülün kod analiz motoru hazırlanmaktadır.")
+          st.code(s_info.get("code_content"), language="python")
+    elif q_ml:
+      st.info("Eşleşen öğrenci bulunamadı.")

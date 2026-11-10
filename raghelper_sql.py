@@ -43,7 +43,7 @@ def evaluate_student_sql(sql_kodu: str, schema_path="schemas/odev1_sema.txt"):
 
     Yanıtını KESİNLİKLE şu formatta ver:
 
-   1. **TOPLAM PUAN:** [Ödev toplam 33 sorudan oluşmaktadır. Öğrencinin kodunda yer almayan, çözülmemiş veya boş bırakılan her soru için puan KESİNLİKLE 0'dır. Puanlama her koşulda 33 soru üzerinden yapılacak ve payda her zaman 33 olacaktır (Örn: Öğrenci sadece 20 soru çözüp 18'ini doğru yaptıysa puan 18/20 değil, KESİNLİKLE 18/33'tür). Sadece "Doğru Sayısı / 33" formatında skor yaz.]
+    1. **TOPLAM PUAN:** [Ödev toplam 33 sorudan oluşmaktadır. Öğrencinin kodunda yer almayan, çözülmemiş veya boş bırakılan her soru için puan KESİNLİKLE 0'dır. Puanlama her koşulda 33 soru üzerinden yapılacak ve payda her zaman 33 olacaktır (Örn: Öğrenci sadece 20 soru çözüp 18'ini doğru yaptıysa puan 18/20 değil, KESİNLİKLE 18/33'tür). Sadece "Doğru Sayısı / 33" formatında skor yaz.]
     2. **SORU BAZLI DEĞERLENDİRME:** (Öğrencinin yazdığı sorguları sırayla ele al; hangileri doğru, hangilerinde hata var açıkla)
     3. **MENTÖRÜN TAVSİYELERİ:** (Öğrencinin kendini geliştirmesi için kısa öneriler)
 
