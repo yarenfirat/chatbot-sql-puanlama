@@ -3,6 +3,7 @@ import os
 import re
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 # 1. Drive Servisi ve SQL Modülleri
 from loaders_sql import (
@@ -33,7 +34,7 @@ from loaders_ml import (
 )
 from raghelper_ml import evaluate_student_ml
 
-# Sayfa Yapılandırması
+# Sayfa Ayarları
 st.set_page_config(
     page_title="Miuul Mentor & AI Değerlendirme Portalı",
     layout="wide",
@@ -41,7 +42,7 @@ st.set_page_config(
 )
 
 
-# Ortak Puan Ayıklama Yardımcıları
+# Puan Ayıklama Yardımcı Fonksiyonları
 def temiz_puan_ayikla_sql(report_text):
   if not report_text:
     return "0/33"
@@ -96,7 +97,7 @@ ana_alan = st.sidebar.radio(
 
 st.sidebar.markdown("---")
 
-# Global Yönetici Girişi
+# Güvenli Yönetici Girişi
 st.sidebar.subheader("🔑 Yönetici Erişimi")
 admin_password_input = st.sidebar.text_input(
     "Yönetici Şifresi",
@@ -104,11 +105,7 @@ admin_password_input = st.sidebar.text_input(
     placeholder="Şifreyi giriniz...",
     key="global_admin_pass",
 )
-
-# Koddaki açık şifreyi kaldırıyoruz; yalnızca secrets'tan okuyor
 correct_password = st.secrets.get("admin_password")
-
-# Eğer secrets tanımlıysa ve şifre eşleşiyorsa yetki ver
 is_admin = bool(correct_password and admin_password_input == correct_password)
 service = None
 
@@ -123,23 +120,28 @@ st.sidebar.markdown("---")
 
 
 # ==========================================
-# ALAN 1: MENTOR COCKPIT
+# ALAN 1: MENTOR COCKPIT (Google Apps Script)
 # ==========================================
 if ana_alan == "📊 Mentor Cockpit":
   st.title("📊 Miuul Mentor Cockpit")
-  st.caption(
-      "Öğrenci genel ilerleme durumu, katılım takip metrikleri ve haftalık özet"
-      " paneli."
-  )
-  col1, col2, col3, col4 = st.columns(4)
-  col1.metric("Toplam Öğrenci", "73")
-  col2.metric("Aktif Takip Edilen", "DA11")
-  col3.metric("Tamamlanan Modüller", "1_CRM, 2_SQL")
-  col4.metric("Devam Eden Modül", "3_PowerBI")
-  st.info(
-      "💡 Mentor Cockpit göstergeleri ve Google Sheets takip tabloları bu alana"
-      " bağlanacaktır."
-  )
+  st.caption("Google Apps Script üzerinde çalışan canlı mentör takip paneli.")
+
+  cockpit_url = st.secrets.get("cockpit_url", "")
+
+  if cockpit_url:
+    col_c1, _ = st.columns([1, 4])
+    with col_c1:
+      st.link_button(
+          "🔗 Paneli Yeni Sekmede Aç", cockpit_url, type="secondary"
+      )
+    st.markdown("---")
+    components.iframe(cockpit_url, height=900, scrolling=True)
+  else:
+    st.warning("⚠️ 'cockpit_url' adresi .streamlit/secrets.toml içinde bulunamadı.")
+    st.info(
+        "Örnek: `cockpit_url ="
+        " 'https://script.google.com/macros/s/.../exec'` şeklinde tanımlayın."
+    )
 
 
 # ==========================================
@@ -154,12 +156,12 @@ elif ana_alan == "🤖 AI Değerlendirme Hub'ı":
           "Power BI",
           "Machine Learning (Python)",
       ],
-      index=0,
+      index=1,
   )
 
-  # ====================================================
+  # ----------------------------------------------------
   # MODÜL 1: CRM ANALYTICS (EXCEL)
-  # ====================================================
+  # ----------------------------------------------------
   if secilen_modul == "CRM Analytics (Excel)":
     st.title("📑 CRM Analytics & Müşteri Segmentasyonu")
     st.caption(
@@ -241,7 +243,6 @@ elif ana_alan == "🤖 AI Değerlendirme Hub'ı":
         )
         st.rerun()
 
-    # CRM İndirme Butonları
     st.sidebar.subheader("📥 CRM Çıktıları")
     if os.path.exists(OUT_XLSX_CRM):
       with open(OUT_XLSX_CRM, "rb") as f:
@@ -261,17 +262,8 @@ elif ana_alan == "🤖 AI Değerlendirme Hub'ı":
             "text/csv",
             key="dl_crm_csv",
         )
-    if os.path.exists(CACHE_CRM):
-      with open(CACHE_CRM, "rb") as f:
-        st.sidebar.download_button(
-            "📦 CRM Cache (.json)",
-            f.read(),
-            CACHE_CRM,
-            "application/json",
-            key="dl_crm_json",
-        )
 
-    # CRM Sorgulama ve Ödev İnceleme
+    # CRM Sorgulama
     st.subheader("🔍 Öğrenci Detaylı CRM Raporu Sorgula")
     cache_crm_data = {}
     if os.path.exists(CACHE_CRM):
@@ -319,9 +311,9 @@ elif ana_alan == "🤖 AI Değerlendirme Hub'ı":
     elif q_crm:
       st.info("Eşleşen öğrenci bulunamadı.")
 
-  # ====================================================
-  # MODÜL 2: SQL
-  # ====================================================
+  # ----------------------------------------------------
+  # MODÜL 2: SQL (Tek Öğrenciyi Yeniden Puanlama Butonlu)
+  # ----------------------------------------------------
   elif secilen_modul == "SQL":
     st.title("⚡ SQL Ödev Değerlendirme (33 Soru)")
     st.caption(
@@ -430,7 +422,6 @@ elif ana_alan == "🤖 AI Değerlendirme Hub'ı":
         st.sidebar.success(f"✅ {guncellenen} öğrencinin SQL kodu kaydedildi!")
         st.rerun()
 
-    # SQL İndirme Butonları
     st.sidebar.subheader("📥 SQL Çıktıları")
     if os.path.exists(OUT_XLSX_SQL):
       with open(OUT_XLSX_SQL, "rb") as f:
@@ -450,17 +441,8 @@ elif ana_alan == "🤖 AI Değerlendirme Hub'ı":
             "text/csv",
             key="dl_sql_csv",
         )
-    if os.path.exists(CACHE_SQL):
-      with open(CACHE_SQL, "rb") as f:
-        st.sidebar.download_button(
-            "📦 SQL Cache (.json)",
-            f.read(),
-            CACHE_SQL,
-            "application/json",
-            key="dl_sql_json",
-        )
 
-    # SQL Sorgulama ve Kod İnceleme
+    # SQL Arama ve İnceleme Ekranı
     st.subheader("🔍 Öğrenci Detaylı SQL Raporu Sorgula")
     student_folders = list_sql_student_folders()
     q_sql = st.text_input(
@@ -487,10 +469,41 @@ elif ana_alan == "🤖 AI Değerlendirme Hub'ı":
       s_info = cache_sql_data.get(sel_sql)
       if s_info:
         puan = s_info.get("puan", "-")
-        st.success(f"✅ Rapor Hazır (Dosya: {s_info.get('dosya_adi', '-')})")
+        st.success(f"✅ Rapor Yüklendi (Dosya: {s_info.get('dosya_adi', '-')})")
         col_a, col_b = st.columns(2)
         col_a.info(f"**Öğrenci:** {sel_sql}")
         col_b.info(f"**Puan:** {puan}")
+
+        # --- YENİ EKLENEN BUTON: TEK ÖĞRENCİYİ SIFIRDAN PUANLA ---
+        if is_admin and service:
+          if st.button(
+              f"🔄 {sel_sql} İçin SQL'i Yeniden Değerlendir (Hafızayı Ez)",
+              key="btn_recalc_single",
+          ):
+            with st.spinner(
+                f"{sel_sql} için dosya Drive'dan indiriliyor ve yapay zeka 33"
+                " soruyu baştan inceliyor..."
+            ):
+              fid = matched_sql.get(sel_sql)
+              sql_kodu, msg = get_sql_file_from_student_folder(service, fid)
+
+              if sql_kodu:
+                yeni_rapor = evaluate_student_sql(sql_kodu)
+                yeni_puan = temiz_puan_ayikla_sql(yeni_rapor)
+
+                cache_sql_data[sel_sql] = {
+                    "puan": yeni_puan,
+                    "dosya_adi": msg,
+                    "detayli_rapor": yeni_rapor,
+                    "sql_kodu": sql_kodu,
+                }
+                with open(CACHE_SQL, "w", encoding="utf-8") as f:
+                  json.dump(cache_sql_data, f, ensure_ascii=False, indent=4)
+
+                st.success(f"🎉 Rapor Güncellendi! Yeni Puan: {yeni_puan}")
+                st.rerun()
+              else:
+                st.error(f"Dosya okunamadı: {msg}")
 
         st.markdown("### 📝 Detaylı Değerlendirme Raporu")
         st.markdown(s_info.get("detayli_rapor", "Rapor metni bulunamadı."))
@@ -504,7 +517,7 @@ elif ana_alan == "🤖 AI Değerlendirme Hub'ı":
             st.code(sql_kodu, language="sql")
         else:
           st.warning(
-              "ℹ️ SQL kodu henüz önbelleğe alınmamış. Sol menüden 'Eksik SQL"
+              "ℹ️ SQL kodu henüz hafızaya alınmamış. Sol menüden 'Eksik SQL"
               " Kodlarını Çek' butonuna basabilirsiniz."
           )
       else:
@@ -512,9 +525,9 @@ elif ana_alan == "🤖 AI Değerlendirme Hub'ı":
     elif q_sql:
       st.info("Eşleşen öğrenci bulunamadı.")
 
-  # ====================================================
+  # ----------------------------------------------------
   # MODÜL 3: POWER BI
-  # ====================================================
+  # ----------------------------------------------------
   elif secilen_modul == "Power BI":
     st.title("📊 Power BI Proje Değerlendirme")
     st.caption(
@@ -596,7 +609,6 @@ elif ana_alan == "🤖 AI Değerlendirme Hub'ı":
         )
         st.rerun()
 
-    # Power BI İndirme Butonları
     st.sidebar.subheader("📥 Power BI Çıktıları")
     if os.path.exists(OUT_XLSX_PBI):
       with open(OUT_XLSX_PBI, "rb") as f:
@@ -616,17 +628,8 @@ elif ana_alan == "🤖 AI Değerlendirme Hub'ı":
             "text/csv",
             key="dl_pbi_csv",
         )
-    if os.path.exists(CACHE_PBI):
-      with open(CACHE_PBI, "rb") as f:
-        st.sidebar.download_button(
-            "📦 Power BI Cache (.json)",
-            f.read(),
-            CACHE_PBI,
-            "application/json",
-            key="dl_pbi_json",
-        )
 
-    # Power BI Sorgulama ve Proje İnceleme
+    # Power BI Sorgulama
     st.subheader("🔍 Öğrenci Detaylı Power BI Raporu Sorgula")
     cache_pbi_data = {}
     if os.path.exists(CACHE_PBI):
@@ -673,9 +676,9 @@ elif ana_alan == "🤖 AI Değerlendirme Hub'ı":
     elif q_pbi:
       st.info("Eşleşen öğrenci bulunamadı.")
 
-  # ====================================================
+  # ----------------------------------------------------
   # MODÜL 4: MACHINE LEARNING (PYTHON)
-  # ====================================================
+  # ----------------------------------------------------
   elif secilen_modul == "Machine Learning (Python)":
     st.title("🧠 Machine Learning Pipeline Değerlendirme")
     st.caption(
@@ -761,7 +764,6 @@ elif ana_alan == "🤖 AI Değerlendirme Hub'ı":
           )
           st.rerun()
 
-    # Machine Learning İndirme Butonları
     st.sidebar.subheader("📥 ML Çıktıları")
     if os.path.exists(OUT_XLSX_ML):
       with open(OUT_XLSX_ML, "rb") as f:
@@ -781,17 +783,8 @@ elif ana_alan == "🤖 AI Değerlendirme Hub'ı":
             "text/csv",
             key="dl_ml_csv",
         )
-    if os.path.exists(CACHE_ML):
-      with open(CACHE_ML, "rb") as f:
-        st.sidebar.download_button(
-            "📦 ML Cache (.json)",
-            f.read(),
-            CACHE_ML,
-            "application/json",
-            key="dl_ml_json",
-        )
 
-    # Machine Learning Sorgulama ve Kod İnceleme
+    # ML Sorgulama
     st.subheader("🔍 Öğrenci Detaylı ML Raporu Sorgula")
     cache_ml_data = {}
     if os.path.exists(CACHE_ML):
