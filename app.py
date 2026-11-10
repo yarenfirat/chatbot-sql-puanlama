@@ -96,7 +96,7 @@ ana_alan = st.sidebar.radio(
 
 st.sidebar.markdown("---")
 
-# Global Yönetici Girişi (Her sekmede tek tek şifre girmeyi önler)
+# Global Yönetici Girişi
 st.sidebar.subheader("🔑 Yönetici Erişimi")
 admin_password_input = st.sidebar.text_input(
     "Yönetici Şifresi",
@@ -104,8 +104,12 @@ admin_password_input = st.sidebar.text_input(
     placeholder="Şifreyi giriniz...",
     key="global_admin_pass",
 )
-correct_password = st.secrets.get("admin_password", "miuul2026")
-is_admin = admin_password_input == correct_password
+
+# Koddaki açık şifreyi kaldırıyoruz; yalnızca secrets'tan okuyor
+correct_password = st.secrets.get("admin_password")
+
+# Eğer secrets tanımlıysa ve şifre eşleşiyorsa yetki ver
+is_admin = bool(correct_password and admin_password_input == correct_password)
 service = None
 
 if is_admin:
