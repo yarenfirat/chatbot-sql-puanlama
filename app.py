@@ -34,7 +34,6 @@ from loaders_ml import (
 )
 from raghelper_ml import evaluate_student_ml
 
-# Sayfa Ayarları
 st.set_page_config(
     page_title="Miuul Mentor & AI Değerlendirme Portalı",
     layout="wide",
@@ -42,7 +41,7 @@ st.set_page_config(
 )
 
 
-# Puan Ayıklama Yardımcı Fonksiyonları
+# Puan Ayıklama Fonksiyonları
 def temiz_puan_ayikla_sql(report_text):
   if not report_text:
     return "0/33"
@@ -118,7 +117,6 @@ elif admin_password_input:
 
 st.sidebar.markdown("---")
 
-
 # ==========================================
 # ALAN 1: MENTOR COCKPIT (Google Apps Script)
 # ==========================================
@@ -142,7 +140,6 @@ if ana_alan == "📊 Mentor Cockpit":
         "Örnek: `cockpit_url ="
         " 'https://script.google.com/macros/s/.../exec'` şeklinde tanımlayın."
     )
-
 
 # ==========================================
 # ALAN 2: AI DEĞERLENDİRME HUB'I
@@ -227,6 +224,7 @@ elif ana_alan == "🤖 AI Değerlendirme Hub'ı":
               "detayli_rapor": report,
               "excel_ozet": ozet if ozet else "",
               "drive_link": drive_link,
+              "folder_id": f_id,
           }
           results.append({"Öğrenci Adı": s_name, "Puan": puan})
           pbar.progress(idx / total)
@@ -263,7 +261,7 @@ elif ana_alan == "🤖 AI Değerlendirme Hub'ı":
             key="dl_crm_csv",
         )
 
-    # CRM Sorgulama
+    # CRM Sorgulama ve Yeniden Puanlama
     st.subheader("🔍 Öğrenci Detaylı CRM Raporu Sorgula")
     cache_crm_data = {}
     if os.path.exists(CACHE_CRM):
@@ -290,6 +288,42 @@ elif ana_alan == "🤖 AI Değerlendirme Hub'ı":
       col_a.info(f"**Öğrenci:** {sel_crm}")
       col_b.info(f"**Puan:** {puan}")
 
+      # Güvenli Tek Öğrenci Puanlama Butonu (Sadece Yönetici Görür)
+      if is_admin and service:
+        if st.button(
+            f"🔄 {sel_crm} İçin CRM Ödevini Yeniden Değerlendir",
+            key="btn_recalc_crm",
+        ):
+          with st.spinner(f"{sel_crm} için Excel ödevi yeniden inceleniyor..."):
+            f_id = s_info.get("folder_id")
+            if not f_id:
+              folders = list_crm_student_folders(service, CRM_ROOT_ID)
+              f_id = folders.get(sel_crm)
+
+            if f_id:
+              ozet, msg, drive_link = get_crm_excel_from_student_folder(
+                  service, f_id
+              )
+              if ozet:
+                yeni_rapor = evaluate_student_crm(ozet)
+                yeni_puan = temiz_puan_ayikla_100(yeni_rapor)
+                cache_crm_data[sel_crm] = {
+                    "puan": yeni_puan,
+                    "dosya_adi": msg,
+                    "detayli_rapor": yeni_rapor,
+                    "excel_ozet": ozet,
+                    "drive_link": drive_link,
+                    "folder_id": f_id,
+                }
+                with open(CACHE_CRM, "w", encoding="utf-8") as f:
+                  json.dump(cache_crm_data, f, ensure_ascii=False, indent=4)
+                st.success(f"🎉 Rapor Güncellendi! Yeni Puan: {yeni_puan}")
+                st.rerun()
+              else:
+                st.error(f"Dosya okunamadı: {msg}")
+            else:
+              st.error("Öğrencinin Drive klasör ID'sine ulaşılamadı.")
+
       st.markdown("### 📝 Detaylı Değerlendirme Raporu")
       st.markdown(s_info.get("detayli_rapor", "Rapor bulunamadı."))
 
@@ -312,7 +346,7 @@ elif ana_alan == "🤖 AI Değerlendirme Hub'ı":
       st.info("Eşleşen öğrenci bulunamadı.")
 
   # ----------------------------------------------------
-  # MODÜL 2: SQL (Tek Öğrenciyi Yeniden Puanlama Butonlu)
+  # MODÜL 2: SQL
   # ----------------------------------------------------
   elif secilen_modul == "SQL":
     st.title("⚡ SQL Ödev Değerlendirme (33 Soru)")
@@ -373,6 +407,7 @@ elif ana_alan == "🤖 AI Değerlendirme Hub'ı":
               "dosya_adi": msg,
               "detayli_rapor": report,
               "sql_kodu": sql_kodu if sql_kodu else "",
+              "folder_id": f_id,
           }
           results.append({"Öğrenci Adı": s_name, "Puan": puan})
           pbar.progress(idx / total)
@@ -442,7 +477,7 @@ elif ana_alan == "🤖 AI Değerlendirme Hub'ı":
             key="dl_sql_csv",
         )
 
-    # SQL Arama ve İnceleme Ekranı
+    # SQL Sorgulama ve Yeniden Puanlama
     st.subheader("🔍 Öğrenci Detaylı SQL Raporu Sorgula")
     student_folders = list_sql_student_folders()
     q_sql = st.text_input(
@@ -474,15 +509,15 @@ elif ana_alan == "🤖 AI Değerlendirme Hub'ı":
         col_a.info(f"**Öğrenci:** {sel_sql}")
         col_b.info(f"**Puan:** {puan}")
 
-        # --- YENİ EKLENEN BUTON: TEK ÖĞRENCİYİ SIFIRDAN PUANLA ---
+        # Güvenli Tek Öğrenci Puanlama Butonu (Sadece Yönetici Görür)
         if is_admin and service:
           if st.button(
-              f"🔄 {sel_sql} İçin SQL'i Yeniden Değerlendir (Hafızayı Ez)",
+              f"🔄 {sel_sql} İçin SQL'i Yeniden Değerlendir",
               key="btn_recalc_single",
           ):
             with st.spinner(
-                f"{sel_sql} için dosya Drive'dan indiriliyor ve yapay zeka 33"
-                " soruyu baştan inceliyor..."
+                f"{sel_sql} için dosya indiriliyor ve 33 soru baştan"
+                " inceleniyor..."
             ):
               fid = matched_sql.get(sel_sql)
               sql_kodu, msg = get_sql_file_from_student_folder(service, fid)
@@ -496,6 +531,7 @@ elif ana_alan == "🤖 AI Değerlendirme Hub'ı":
                     "dosya_adi": msg,
                     "detayli_rapor": yeni_rapor,
                     "sql_kodu": sql_kodu,
+                    "folder_id": fid,
                 }
                 with open(CACHE_SQL, "w", encoding="utf-8") as f:
                   json.dump(cache_sql_data, f, ensure_ascii=False, indent=4)
@@ -593,6 +629,7 @@ elif ana_alan == "🤖 AI Değerlendirme Hub'ı":
               "detayli_rapor": report,
               "pbi_summary": ozet if ozet else "",
               "drive_link": drive_link,
+              "folder_id": f_id,
           }
           results.append({"Öğrenci Adı": s_name, "Puan": puan})
           pbar.progress(idx / total)
@@ -629,7 +666,7 @@ elif ana_alan == "🤖 AI Değerlendirme Hub'ı":
             key="dl_pbi_csv",
         )
 
-    # Power BI Sorgulama
+    # Power BI Sorgulama ve Yeniden Puanlama
     st.subheader("🔍 Öğrenci Detaylı Power BI Raporu Sorgula")
     cache_pbi_data = {}
     if os.path.exists(CACHE_PBI):
@@ -655,6 +692,44 @@ elif ana_alan == "🤖 AI Değerlendirme Hub'ı":
       col_a, col_b = st.columns(2)
       col_a.info(f"**Öğrenci:** {sel_pbi}")
       col_b.info(f"**Puan:** {puan}")
+
+      # Güvenli Tek Öğrenci Puanlama Butonu (Sadece Yönetici Görür)
+      if is_admin and service:
+        if st.button(
+            f"🔄 {sel_pbi} İçin Power BI Projesini Yeniden Değerlendir",
+            key="btn_recalc_pbi",
+        ):
+          with st.spinner(
+              f"{sel_pbi} için Power BI dosyası yeniden inceleniyor..."
+          ):
+            f_id = s_info.get("folder_id")
+            if not f_id:
+              folders = list_pbi_student_folders(service, PBI_ROOT_ID)
+              f_id = folders.get(sel_pbi)
+
+            if f_id:
+              ozet, msg, drive_link = get_pbi_file_from_student_folder(
+                  service, f_id
+              )
+              if ozet:
+                yeni_rapor = evaluate_student_pbi(ozet)
+                yeni_puan = temiz_puan_ayikla_100(yeni_rapor)
+                cache_pbi_data[sel_pbi] = {
+                    "puan": yeni_puan,
+                    "dosya_adi": msg,
+                    "detayli_rapor": yeni_rapor,
+                    "pbi_summary": ozet,
+                    "drive_link": drive_link,
+                    "folder_id": f_id,
+                }
+                with open(CACHE_PBI, "w", encoding="utf-8") as f:
+                  json.dump(cache_pbi_data, f, ensure_ascii=False, indent=4)
+                st.success(f"🎉 Rapor Güncellendi! Yeni Puan: {yeni_puan}")
+                st.rerun()
+              else:
+                st.error(f"Dosya okunamadı: {msg}")
+            else:
+              st.error("Öğrencinin Drive klasör ID'sine ulaşılamadı.")
 
       st.markdown("### 📝 Detaylı Değerlendirme Raporu")
       st.markdown(s_info.get("detayli_rapor", "Rapor metni bulunamadı."))
@@ -747,6 +822,7 @@ elif ana_alan == "🤖 AI Değerlendirme Hub'ı":
                 "detayli_rapor": report,
                 "code_content": kod if kod else "",
                 "drive_link": drive_link,
+                "folder_id": f_id,
             }
             results.append({"Öğrenci Adı": s_name, "Puan": puan})
             pbar.progress(idx / total)
@@ -784,7 +860,7 @@ elif ana_alan == "🤖 AI Değerlendirme Hub'ı":
             key="dl_ml_csv",
         )
 
-    # ML Sorgulama
+    # ML Sorgulama ve Yeniden Puanlama
     st.subheader("🔍 Öğrenci Detaylı ML Raporu Sorgula")
     cache_ml_data = {}
     if os.path.exists(CACHE_ML):
@@ -808,6 +884,42 @@ elif ana_alan == "🤖 AI Değerlendirme Hub'ı":
       col_a, col_b = st.columns(2)
       col_a.info(f"**Öğrenci:** {sel_ml}")
       col_b.info(f"**Puan:** {puan}")
+
+      # Güvenli Tek Öğrenci Puanlama Butonu (Sadece Yönetici Görür)
+      if is_admin and service:
+        if st.button(
+            f"🔄 {sel_ml} İçin ML Pipeline'ını Yeniden Değerlendir",
+            key="btn_recalc_ml",
+        ):
+          with st.spinner(f"{sel_ml} için Python kodu yeniden inceleniyor..."):
+            f_id = s_info.get("folder_id")
+            if not f_id:
+              folders = list_ml_student_folders(service, ML_ROOT_ID)
+              f_id = folders.get(sel_ml)
+
+            if f_id:
+              kod, msg, drive_link = get_ml_file_from_student_folder(
+                  service, f_id
+              )
+              if kod:
+                yeni_rapor = evaluate_student_ml(kod)
+                yeni_puan = temiz_puan_ayikla_100(yeni_rapor)
+                cache_ml_data[sel_ml] = {
+                    "puan": yeni_puan,
+                    "dosya_adi": msg,
+                    "detayli_rapor": yeni_rapor,
+                    "code_content": kod,
+                    "drive_link": drive_link,
+                    "folder_id": f_id,
+                }
+                with open(CACHE_ML, "w", encoding="utf-8") as f:
+                  json.dump(cache_ml_data, f, ensure_ascii=False, indent=4)
+                st.success(f"🎉 Rapor Güncellendi! Yeni Puan: {yeni_puan}")
+                st.rerun()
+              else:
+                st.error(f"Dosya okunamadı: {msg}")
+            else:
+              st.error("Öğrencinin Drive klasör ID'sine ulaşılamadı.")
 
       st.markdown("### 📝 Detaylı Değerlendirme Raporu")
       st.markdown(s_info.get("detayli_rapor", "Rapor metni bulunamadı."))
