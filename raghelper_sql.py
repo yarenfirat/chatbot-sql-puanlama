@@ -21,14 +21,6 @@ def evaluate_student_sql(sql_kodu: str, schema_path="schemas/odev1_sema.txt"):
   else:
     sema_icerigi = "Veritabanı şeması bulunamadı."
 
-  # Güvenlik önlemi: Kod aşırı uzunsa modelin token sınırını aşmaması için kırpıyoruz
-  if len(sql_kodu) > 12000:
-    sql_kodu = (
-        sql_kodu[:12000]
-        + "\n\n[... Kod çok uzun olduğu için son kısım kırpıldı ...]"
-    )
-
-
 
 
 
